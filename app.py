@@ -142,15 +142,107 @@ def parse_x_ranges(range_str):
 
 # Function to crop spectrum to ranges
 def crop_to_ranges(x, y, ranges):
-    """Crop spectrum to specified ranges"""
+    """Crop spectrum to specified ranges and create data with gaps"""
     if ranges is None:
-        return x, y
+        return x, y, None
     
-    mask = np.zeros(len(x), dtype=bool)
+    # Create mask for each range
+    masks = []
     for start, end in ranges:
-        mask |= (x >= start) & (x <= end)
+        mask = (x >= start) & (x <= end)
+        masks.append(mask)
     
-    return x[mask], y[mask]
+    # Combine all masks
+    combined_mask = np.zeros(len(x), dtype=bool)
+    for mask in masks:
+        combined_mask |= mask
+    
+    # Create data with gaps (NaN for excluded regions)
+    x_gapped = x.copy()
+    y_gapped = y.copy()
+    x_gapped[~combined_mask] = np.nan
+    y_gapped[~combined_mask] = np.nan
+    
+    return x_gapped, y_gapped, ranges
+
+def get_range_boundaries(ranges):
+    """Get boundaries for axis limits"""
+    if not ranges:
+        return None, None
+    
+    all_x = []
+    for start, end in ranges:
+        all_x.extend([start, end])
+    
+    return min(all_x), max(all_x)
+
+def create_plot_with_gaps(spectra_dict, x_label, y_label, title, offset=0, fill=False, 
+                          x_range=None, normalized=False):
+    """Create scientific plot with gaps between selected ranges"""
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Store handles and labels for legend
+    handles = []
+    labels = []
+    
+    for name, spec in spectra_dict.items():
+        data = spec['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        color = spec['color']
+        
+        # Remove .txt extension from name for display
+        display_name = name.replace('.txt', '')
+        
+        # Apply x range cropping with gaps
+        if x_range is not None:
+            x, y, ranges = crop_to_ranges(x_orig, y_orig, x_range)
+        else:
+            x, y = x_orig, y_orig
+            ranges = None
+        
+        if len(x) == 0:
+            continue
+        
+        # Apply offset
+        y_plot = y + offset if offset != 0 else y
+        
+        # Plot with gaps (NaN values create breaks)
+        if fill and normalized:
+            # Fill requires handling NaN values - fill only where not NaN
+            mask = ~np.isnan(x)
+            if np.any(mask):
+                ax.fill_between(x[mask], 0, y_plot[mask], alpha=0.3, color=color)
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+                handles.append(line_handle[0])
+                labels.append(display_name)
+        else:
+            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            handles.append(line_handle[0])
+            labels.append(display_name)
+    
+    # Set axis limits to cover all ranges
+    if x_range is not None:
+        min_x, max_x = get_range_boundaries(x_range)
+        if min_x is not None and max_x is not None:
+            ax.set_xlim(min_x, max_x)
+    
+    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
+    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    
+    # Create legend with proper colors and bold text
+    if handles:
+        legend = ax.legend(handles, labels, loc='best', fontsize=10, 
+                          frameon=True, edgecolor='black', prop={'weight': 'bold'})
+        # Make legend text colors match line colors
+        for text, handle in zip(legend.get_texts(), handles):
+            text.set_color(handle.get_color())
+    
+    ax.tick_params(direction='out', length=4, width=0.8)
+    
+    plt.tight_layout()
+    return fig
 
 # Function to create plot
 def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False, 
@@ -173,7 +265,9 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
         
         # Apply x range cropping
         if x_range is not None:
-            x, y = crop_to_ranges(x, y, x_range)
+            x, y, ranges = crop_to_ranges(x, y, x_range)
+        else:
+            ranges = None
         
         if len(x) == 0:
             continue
@@ -191,6 +285,12 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
             handles.append(line_handle[0])
             labels.append(display_name)
+
+        # Set axis limits to cover all ranges
+        if x_range is not None:
+            min_x, max_x = get_range_boundaries(x_range)
+            if min_x is not None and max_x is not None:
+                ax.set_xlim(min_x, max_x)
     
     ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
     ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
