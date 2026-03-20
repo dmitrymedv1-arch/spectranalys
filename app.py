@@ -209,6 +209,64 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
     plt.tight_layout()
     return fig
 
+def create_plot_with_individual_offset(spectra_dict, x_label, y_label, title, 
+                                        offset_dict, x_range=None, fill=False, 
+                                        normalized=False):
+    """Create scientific plot with individual offsets for each spectrum"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Store handles and labels for legend
+    handles = []
+    labels = []
+    
+    for name, spec in spectra_dict.items():
+        data = spec['data']
+        x = data['x'].values
+        y = data['y'].values
+        color = spec['color']
+        
+        # Remove .txt extension from name for display
+        display_name = name.replace('.txt', '')
+        
+        # Apply x range cropping
+        if x_range is not None:
+            x, y = crop_to_ranges(x, y, x_range)
+        
+        if len(x) == 0:
+            continue
+        
+        # Apply individual offset
+        offset = offset_dict.get(name, 0)
+        y_plot = y + offset
+        
+        # Plot
+        if fill and normalized:
+            ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            handles.append(line_handle[0])
+            labels.append(display_name)
+        else:
+            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            handles.append(line_handle[0])
+            labels.append(display_name)
+    
+    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
+    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    
+    # Create legend with proper colors and bold text
+    if handles:
+        legend = ax.legend(handles, labels, loc='best', fontsize=10, 
+                          frameon=True, edgecolor='black', prop={'weight': 'bold'})
+        # Make legend text colors match line colors
+        for text, handle in zip(legend.get_texts(), handles):
+            text.set_color(handle.get_color())
+    
+    ax.tick_params(direction='out', length=4, width=0.8)
+    
+    plt.tight_layout()
+    return fig
+
 # Function for peak analysis
 def analyze_peaks(spectra_dict, x_range=None, peak_width=20):
     """Analyze peaks in spectra"""
@@ -368,14 +426,32 @@ def main():
                                 st.warning("Invalid range format")
                     
                     # Offset options
-                    st.subheader("Offset")
-                    offset_value = st.slider(
-                        "Offset value",
-                        min_value=0.0,
-                        max_value=10.0,
-                        value=0.0,
-                        step=0.1
-                    )
+                    st.subheader("Offset for Raw Spectra")
+                    st.info("Raw spectra can have high intensity values (0-100000+)")
+                    raw_offset_values = {}
+                    for i, name in enumerate(ordered_spectra):
+                        raw_offset_values[name] = st.slider(
+                            f"Offset for {name.replace('.txt', '')}",
+                            min_value=0.0,
+                            max_value=50000.0,
+                            value=0.0,
+                            step=100.0,
+                            key=f"raw_offset_{name}"
+                        )
+                    
+                    st.markdown("---")
+                    st.subheader("Offset for Normalized Spectra")
+                    st.info("Normalized spectra range from 0 to 1")
+                    norm_offset_values = {}
+                    for i, name in enumerate(ordered_spectra):
+                        norm_offset_values[name] = st.slider(
+                            f"Offset for {name.replace('.txt', '')}",
+                            min_value=0.0,
+                            max_value=5.0,
+                            value=0.0,
+                            step=0.1,
+                            key=f"norm_offset_{name}"
+                        )
                     
                     fill_area = st.checkbox("Fill area under normalized spectra", value=False)
                     
@@ -478,15 +554,16 @@ def main():
                 plt.close()
             else:
                 st.warning("No spectra selected")
-        
+
         with tab3:
-            st.subheader(f"Raw Spectra with Offset (offset = {offset_value})")
+            st.subheader("Raw Spectra with Individual Offsets")
             if filtered_spectra:
-                fig = create_plot(
+                fig = create_plot_with_individual_offset(
                     filtered_spectra, x_label, y_label, 
-                    f"Raw Spectra (offset = {offset_value})",
-                    offset=offset_value,
-                    x_range=x_ranges
+                    "Raw Spectra with Individual Offsets",
+                    offset_dict=raw_offset_values,
+                    x_range=x_ranges,
+                    normalized=False
                 )
                 st.pyplot(fig)
                 plt.close()
@@ -494,15 +571,15 @@ def main():
                 st.warning("No spectra selected")
         
         with tab4:
-            st.subheader(f"Normalized Spectra with Offset (offset = {offset_value})")
+            st.subheader("Normalized Spectra with Individual Offsets")
             if filtered_norm_spectra:
-                fig = create_plot(
+                fig = create_plot_with_individual_offset(
                     filtered_norm_spectra, x_label, 
                     f"Normalized Intensity ({norm_method})", 
-                    f"Normalized Spectra (offset = {offset_value})",
-                    offset=offset_value,
-                    fill=fill_area,
+                    "Normalized Spectra with Individual Offsets",
+                    offset_dict=norm_offset_values,
                     x_range=x_ranges,
+                    fill=fill_area,
                     normalized=True
                 )
                 st.pyplot(fig)
