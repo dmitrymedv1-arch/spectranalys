@@ -327,7 +327,6 @@ def crop_to_ranges_multi(x, y, ranges):
     return segments
 
 # Function to create combined plot with all four visualization types
-# Function to create combined plot with all four visualization types
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
                          norm_method, x_ranges=None):
@@ -454,15 +453,23 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
         if handles:
             # For offset plots, reverse the legend order so top curve appears first
             if use_offset:
-                legend = ax.legend(reversed(handles), reversed(labels), loc='best', fontsize=8,
+                # Create reversed lists for legend
+                reversed_handles = list(reversed(handles))
+                reversed_labels = list(reversed(labels))
+                
+                legend = ax.legend(reversed_handles, reversed_labels, loc='best', fontsize=8,
                                   frameon=True, edgecolor='black', prop={'weight': 'bold'})
+                
+                # Set legend text colors to match line colors using reversed handles
+                for text, handle in zip(legend.get_texts(), reversed_handles):
+                    text.set_color(handle.get_color())
             else:
                 legend = ax.legend(handles, labels, loc='best', fontsize=8,
                                   frameon=True, edgecolor='black', prop={'weight': 'bold'})
-            
-            # Set legend text colors to match line colors
-            for text, handle in zip(legend.get_texts(), handles):
-                text.set_color(handle.get_color())
+                
+                # Set legend text colors to match line colors
+                for text, handle in zip(legend.get_texts(), handles):
+                    text.set_color(handle.get_color())
         
         ax.tick_params(direction='in', length=5, width=1)
         ax.grid(True, alpha=0.3, linestyle='--')
