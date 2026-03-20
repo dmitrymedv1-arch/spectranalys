@@ -1073,7 +1073,7 @@ Correlation Analysis: {param_correlation}
             
             <h4>📁 File Format:</h4>
             <p>Your .txt files should contain two columns separated by tabs:</p>
-            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px;">
+            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace; white-space: pre;">
 100.5    1250.3
 101.2    1248.7
 102.0    1251.5
