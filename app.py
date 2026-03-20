@@ -158,11 +158,18 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
     """Create scientific plot"""
     fig, ax = plt.subplots(figsize=(10, 6))
     
+    # Store handles and labels for legend
+    handles = []
+    labels = []
+    
     for name, spec in spectra_dict.items():
         data = spec['data']
         x = data['x'].values
         y = data['y'].values
         color = spec['color']
+        
+        # Remove .txt extension from name for display
+        display_name = name.replace('.txt', '')
         
         # Apply x range cropping
         if x_range is not None:
@@ -176,15 +183,27 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
         
         # Plot
         if fill and normalized:
-            ax.fill_between(x, 0, y_plot, alpha=0.3, color=color, label=name)
-            ax.plot(x, y_plot, color=color, linewidth=1.5)
+            fill_handle = ax.fill_between(x, 0, y_plot, alpha=0.3, color=color, label=display_name)
+            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5)
+            handles.append(line_handle[0])
+            labels.append(display_name)
         else:
-            ax.plot(x, y_plot, color=color, linewidth=1.5, label=name)
+            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            handles.append(line_handle[0])
+            labels.append(display_name)
     
     ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
     ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
     ax.set_title(title, fontsize=12, fontweight='bold')
-    ax.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
+    
+    # Create legend with proper colors
+    if handles:
+        legend = ax.legend(handles, labels, loc='best', fontsize=10, 
+                          frameon=True, edgecolor='black')
+        # Make legend text colors match line colors
+        for text, handle in zip(legend.get_texts(), handles):
+            text.set_color(handle.get_color())
+    
     ax.tick_params(direction='out', length=4, width=0.8)
     
     plt.tight_layout()
