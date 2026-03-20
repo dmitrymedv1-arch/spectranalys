@@ -6,7 +6,6 @@ from scipy.signal import find_peaks
 from scipy.integrate import simpson
 from io import StringIO
 import re
-import matplotlib.pyplot as plt
 
 # Set page config
 st.set_page_config(
@@ -72,7 +71,7 @@ def load_spectrum(uploaded_file):
 def normalize_spectrum(x, y, norm_method, norm_range=None):
     """Normalize spectrum using different methods"""
     if norm_method == "Maximum intensity":
-        return y / y.max()
+        return y / y.max() if y.max() != 0 else y
     
     elif norm_method == "Area":
         area = simpson(y, x)
@@ -124,7 +123,7 @@ def align_x_ranges(spectra_dict):
 # Function to extract x ranges from string
 def parse_x_ranges(range_str):
     """Parse x ranges from string like '100-200, 300-400'"""
-    if not range_str or range_str == "Full range":
+    if not range_str or range_str == "":
         return None
     
     ranges = []
@@ -140,186 +139,121 @@ def parse_x_ranges(range_str):
     
     return ranges if ranges else None
 
-# Function to crop spectrum to ranges
-def crop_to_ranges(x, y, ranges):
-    """Crop spectrum to specified ranges and create data with gaps"""
+# Function to crop spectrum to ranges and create data for broken axis
+def crop_to_ranges_multi(x, y, ranges):
+    """Crop spectrum to multiple ranges and return list of (x_segment, y_segment)"""
     if ranges is None:
-        return x, y, None
+        return [(x, y)]
     
-    # Create mask for each range
-    masks = []
+    segments = []
     for start, end in ranges:
         mask = (x >= start) & (x <= end)
-        masks.append(mask)
+        if np.any(mask):
+            segments.append((x[mask], y[mask]))
     
-    # Combine all masks
-    combined_mask = np.zeros(len(x), dtype=bool)
-    for mask in masks:
-        combined_mask |= mask
-    
-    # Create data with gaps (NaN for excluded regions)
-    x_gapped = x.copy()
-    y_gapped = y.copy()
-    x_gapped[~combined_mask] = np.nan
-    y_gapped[~combined_mask] = np.nan
-    
-    return x_gapped, y_gapped, ranges
+    return segments
 
-def get_range_boundaries(ranges):
-    """Get boundaries for axis limits"""
-    if not ranges:
-        return None, None
+# Function to create plot with multiple x-range segments (broken axis)
+def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title, 
+                                  offset_step=0, x_ranges=None, fill=False, 
+                                  normalized=False, use_cumulative_offset=False):
+    """Create scientific plot with multiple x-range segments on same axis"""
     
-    all_x = []
-    for start, end in ranges:
-        all_x.extend([start, end])
+    if x_ranges is None or len(x_ranges) == 0:
+        # Simple plot without broken axis
+        return create_plot_simple(spectra_dict, x_label, y_label, title, 
+                                   offset_step, fill, normalized, use_cumulative_offset)
     
-    return min(all_x), max(all_x)
-
-def create_plot_with_gaps(spectra_dict, x_label, y_label, title, offset=0, fill=False, 
-                          x_range=None, normalized=False):
-    """Create scientific plot with gaps between selected ranges"""
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Create figure with subplots for each range
+    n_ranges = len(x_ranges)
+    fig, axes = plt.subplots(1, n_ranges, figsize=(5 * n_ranges, 6), 
+                              sharey=True, gridspec_kw={'wspace': 0.05})
     
-    # Store handles and labels for legend
-    handles = []
-    labels = []
-    
-    for name, spec in spectra_dict.items():
-        data = spec['data']
-        x_orig = data['x'].values
-        y_orig = data['y'].values
-        color = spec['color']
-        
-        # Remove .txt extension from name for display
-        display_name = name.replace('.txt', '')
-        
-        # Apply x range cropping with gaps
-        if x_range is not None:
-            x, y, ranges = crop_to_ranges(x_orig, y_orig, x_range)
-        else:
-            x, y = x_orig, y_orig
-            ranges = None
-        
-        if len(x) == 0:
-            continue
-        
-        # Apply offset
-        y_plot = y + offset if offset != 0 else y
-        
-        # Plot with gaps (NaN values create breaks)
-        if fill and normalized:
-            # Fill requires handling NaN values - fill only where not NaN
-            mask = ~np.isnan(x)
-            if np.any(mask):
-                ax.fill_between(x[mask], 0, y_plot[mask], alpha=0.3, color=color)
-                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-                handles.append(line_handle[0])
-                labels.append(display_name)
-        else:
-            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-            handles.append(line_handle[0])
-            labels.append(display_name)
-    
-    # Set axis limits to cover all ranges
-    if x_range is not None:
-        min_x, max_x = get_range_boundaries(x_range)
-        if min_x is not None and max_x is not None:
-            ax.set_xlim(min_x, max_x)
-    
-    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
-    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
-    ax.set_title(title, fontsize=12, fontweight='bold')
-    
-    # Create legend with proper colors and bold text
-    if handles:
-        legend = ax.legend(handles, labels, loc='best', fontsize=10, 
-                          frameon=True, edgecolor='black', prop={'weight': 'bold'})
-        # Make legend text colors match line colors
-        for text, handle in zip(legend.get_texts(), handles):
-            text.set_color(handle.get_color())
-    
-    ax.tick_params(direction='out', length=4, width=0.8)
-    
-    plt.tight_layout()
-    return fig
-
-# Function to create plot
-def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False, 
-                x_range=None, normalized=False, common_x_range=False):
-    """Create scientific plot"""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Store handles and labels for legend
-    handles = []
-    labels = []
-    
-    for name, spec in spectra_dict.items():
-        data = spec['data']
-        x = data['x'].values
-        y = data['y'].values
-        color = spec['color']
-        
-        # Remove .txt extension from name for display
-        display_name = name.replace('.txt', '')
-        
-        # Apply x range cropping
-        if x_range is not None:
-            x, y, ranges = crop_to_ranges(x, y, x_range)
-        else:
-            ranges = None
-        
-        if len(x) == 0:
-            continue
-        
-        # Apply offset
-        y_plot = y + offset if offset != 0 else y
-        
-        # Plot
-        if fill and normalized:
-            fill_handle = ax.fill_between(x, 0, y_plot, alpha=0.3, color=color, label=display_name)
-            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5)
-            handles.append(line_handle[0])
-            labels.append(display_name)
-        else:
-            line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-            handles.append(line_handle[0])
-            labels.append(display_name)
-
-        # Set axis limits to cover all ranges
-        if x_range is not None:
-            min_x, max_x = get_range_boundaries(x_range)
-            if min_x is not None and max_x is not None:
-                ax.set_xlim(min_x, max_x)
-    
-    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
-    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
-    ax.set_title(title, fontsize=12, fontweight='bold')
-    
-    # Create legend with proper colors
-    if handles:
-        legend = ax.legend(handles, labels, loc='best', fontsize=12, 
-                          frameon=True, edgecolor='black', prop={'weight': 'bold'})
-        # Make legend text colors match line colors
-        for text, handle in zip(legend.get_texts(), handles):
-            text.set_color(handle.get_color())
-    
-    ax.tick_params(direction='out', length=4, width=0.8)
-    
-    plt.tight_layout()
-    return fig
-
-def create_plot_with_cumulative_offset(spectra_dict, x_label, y_label, title, 
-                                        offset_step, x_range=None, fill=False, 
-                                        normalized=False):
-    """Create scientific plot with cumulative offsets (1st: 0, 2nd: +step, 3rd: +2*step, ...)"""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Store handles and labels for legend
-    handles = []
-    labels = []
+    if n_ranges == 1:
+        axes = [axes]
     
     # Sort spectra to maintain consistent order
+    spectra_items = list(spectra_dict.items())
+    
+    for ax_idx, (ax, (start, end)) in enumerate(zip(axes, x_ranges)):
+        # Store handles and labels for legend (only for first subplot to avoid duplication)
+        handles = []
+        labels = []
+        
+        for idx, (name, spec) in enumerate(spectra_items):
+            data = spec['data']
+            x_full = data['x'].values
+            y_full = data['y'].values
+            color = spec['color']
+            
+            # Remove .txt extension from name for display
+            display_name = name.replace('.txt', '')
+            
+            # Crop to current range
+            mask = (x_full >= start) & (x_full <= end)
+            if not np.any(mask):
+                continue
+            
+            x = x_full[mask]
+            y = y_full[mask]
+            
+            # Apply cumulative offset if requested
+            if use_cumulative_offset:
+                offset = idx * offset_step
+            else:
+                offset = 0
+            
+            y_plot = y + offset
+            
+            # Plot
+            if fill and normalized and not use_cumulative_offset:
+                ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            elif fill and normalized and use_cumulative_offset:
+                ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            else:
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            
+            # Add to legend only for first subplot
+            if ax_idx == 0:
+                handles.append(line_handle[0])
+                labels.append(display_name)
+        
+        ax.set_xlabel(f'{x_label}\n[{start:.0f} - {end:.0f}]', fontsize=10, fontweight='bold')
+        ax.tick_params(direction='out', length=4, width=0.8)
+        
+        # Add vertical lines at range boundaries
+        ax.axvline(start, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        ax.axvline(end, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        
+        # Set x limits
+        ax.set_xlim(start, end)
+    
+    # Set y label for all subplots
+    axes[0].set_ylabel(y_label, fontsize=11, fontweight='bold')
+    
+    # Add legend to first subplot
+    if handles:
+        legend = axes[0].legend(handles, labels, loc='best', fontsize=10, 
+                                frameon=True, edgecolor='black', prop={'weight': 'bold'})
+        for text, handle in zip(legend.get_texts(), handles):
+            text.set_color(handle.get_color())
+    
+    # Set main title
+    fig.suptitle(title, fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    
+    return fig
+
+def create_plot_simple(spectra_dict, x_label, y_label, title, 
+                       offset_step=0, fill=False, normalized=False, use_cumulative_offset=False):
+    """Create simple scientific plot without broken axis"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    handles = []
+    labels = []
+    
     spectra_items = list(spectra_dict.items())
     
     for idx, (name, spec) in enumerate(spectra_items):
@@ -328,50 +262,42 @@ def create_plot_with_cumulative_offset(spectra_dict, x_label, y_label, title,
         y = data['y'].values
         color = spec['color']
         
-        # Remove .txt extension from name for display
         display_name = name.replace('.txt', '')
         
-        # Apply x range cropping
-        if x_range is not None:
-            x, y = crop_to_ranges(x, y, x_range)
+        # Apply cumulative offset if requested
+        if use_cumulative_offset:
+            offset = idx * offset_step
+        else:
+            offset = 0
         
-        if len(x) == 0:
-            continue
-        
-        # Apply cumulative offset: first spectrum gets 0, second gets offset_step, third gets 2*offset_step, etc.
-        offset = idx * offset_step
         y_plot = y + offset
         
-        # Plot
         if fill and normalized:
             ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-            handles.append(line_handle[0])
-            labels.append(display_name)
         else:
             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-            handles.append(line_handle[0])
-            labels.append(display_name)
+        
+        handles.append(line_handle[0])
+        labels.append(display_name)
     
     ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
     ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
     ax.set_title(title, fontsize=12, fontweight='bold')
     
-    # Create legend with proper colors and bold text
     if handles:
         legend = ax.legend(handles, labels, loc='best', fontsize=10, 
                           frameon=True, edgecolor='black', prop={'weight': 'bold'})
-        # Make legend text colors match line colors
         for text, handle in zip(legend.get_texts(), handles):
             text.set_color(handle.get_color())
     
     ax.tick_params(direction='out', length=4, width=0.8)
-    
     plt.tight_layout()
+    
     return fig
 
 # Function for peak analysis
-def analyze_peaks(spectra_dict, x_range=None, peak_width=20):
+def analyze_peaks(spectra_dict, x_ranges=None, peak_width=20):
     """Analyze peaks in spectra"""
     results = []
     
@@ -380,8 +306,17 @@ def analyze_peaks(spectra_dict, x_range=None, peak_width=20):
         x = data['x'].values
         y = data['y'].values
         
-        if x_range is not None:
-            x, y = crop_to_ranges(x, y, x_range)
+        if x_ranges is not None:
+            # Crop to ranges for peak analysis
+            x_cropped = []
+            y_cropped = []
+            for start, end in x_ranges:
+                mask = (x >= start) & (x <= end)
+                if np.any(mask):
+                    x_cropped.extend(x[mask])
+                    y_cropped.extend(y[mask])
+            x = np.array(x_cropped)
+            y = np.array(y_cropped)
         
         if len(x) == 0:
             continue
@@ -399,7 +334,7 @@ def analyze_peaks(spectra_dict, x_range=None, peak_width=20):
             area = simpson(y[left_idx:right_idx+1], x[left_idx:right_idx+1])
             
             results.append({
-                'Spectrum': name,
+                'Spectrum': name.replace('.txt', ''),
                 'Peak position': peak_x,
                 'Intensity': peak_y,
                 'Area': area
@@ -432,7 +367,7 @@ def main():
                 if data is not None:
                     spectra_data[file.name] = {
                         'data': data,
-                        'color': None  # Will be assigned later
+                        'color': None
                     }
             
             if spectra_data:
@@ -449,7 +384,7 @@ def main():
                 if selected_spectra:
                     # Order spectra
                     ordered_spectra = []
-                    for i, name in enumerate(selected_spectra):
+                    for name in selected_spectra:
                         ordered_spectra.append(name)
                     
                     # Assign colors with default distinct colors
@@ -467,9 +402,8 @@ def main():
                     for i, name in enumerate(ordered_spectra):
                         col1, col2 = st.columns([3, 1])
                         with col1:
-                            st.markdown(f"**{name}**")
+                            st.markdown(f"**{name.replace('.txt', '')}**")
                         with col2:
-                            # Use default color from palette, cycling if more spectra than colors
                             default_color = default_colors[i % len(default_colors)]
                             colors[name] = st.color_picker(
                                 f"Color {i+1}",
@@ -491,17 +425,20 @@ def main():
                     st.subheader("X-axis Ranges")
                     x_range_option = st.radio(
                         "Select range mode",
-                        ["Full range", "Custom ranges"]
+                        ["Full range", "Custom ranges (multiple)"]
                     )
                     
                     x_ranges = None
-                    if x_range_option == "Custom ranges":
+                    if x_range_option == "Custom ranges (multiple)":
                         range_input = st.text_area(
-                            "Enter ranges (e.g., 100-200, 300-400)",
-                            placeholder="100-200, 300-400"
+                            "Enter ranges (e.g., 100-150, 350-450, 600-800)",
+                            placeholder="100-150, 350-450, 600-800",
+                            help="Each range will be displayed as a separate segment on the same graph"
                         )
                         if range_input:
                             x_ranges = parse_x_ranges(range_input)
+                            if x_ranges:
+                                st.info(f"Selected {len(x_ranges)} ranges: {', '.join([f'{r[0]:.0f}-{r[1]:.0f}' for r in x_ranges])}")
                     
                     # Axis labels
                     st.subheader("Axis Labels")
@@ -529,8 +466,9 @@ def main():
                                 st.warning("Invalid range format")
                     
                     # Offset options for raw spectra
+                    st.markdown("---")
                     st.subheader("Offset for Raw Spectra")
-                    st.info("Raw spectra offset - each subsequent spectrum gets +offset")
+                    st.info("Each subsequent spectrum gets +offset (1st: 0, 2nd: +step, 3rd: +2*step, ...)")
                     raw_offset_step = st.slider(
                         "Offset step for raw spectra",
                         min_value=0.0,
@@ -540,9 +478,9 @@ def main():
                         key="raw_offset_step"
                     )
                     
-                    st.markdown("---")
+                    # Offset options for normalized spectra
                     st.subheader("Offset for Normalized Spectra")
-                    st.info("Normalized spectra offset - each subsequent spectrum gets +offset")
+                    st.info("Each subsequent spectrum gets +offset (1st: 0, 2nd: +step, 3rd: +2*step, ...)")
                     norm_offset_step = st.slider(
                         "Offset step for normalized spectra",
                         min_value=0.0,
@@ -552,6 +490,7 @@ def main():
                         key="norm_offset_step"
                     )
                     
+                    # Fill area option
                     fill_area = st.checkbox("Fill area under normalized spectra", value=False)
                     
                     # Peak analysis options
@@ -560,10 +499,6 @@ def main():
                     analyze_peaks_flag = st.checkbox("Enable peak analysis", value=False)
                     
                     if analyze_peaks_flag:
-                        peak_analysis_range = None
-                        if x_range_option == "Custom ranges" and range_input:
-                            peak_analysis_range = x_ranges
-                        
                         peak_width = st.slider(
                             "Peak width for area calculation",
                             min_value=5,
@@ -582,15 +517,16 @@ def main():
                         param_values = {}
                         for name in ordered_spectra:
                             param_values[name] = st.number_input(
-                                f"Value for {name}",
-                                value=float(len(param_values)),
+                                f"Value for {name.replace('.txt', '')}",
+                                value=float(len(param_values) + 1),
+                                step=1.0,
                                 key=f"param_{name}"
                             )
                         
                         param_label = st.text_input("Parameter label", value="Sample number")
     
     # Main content area
-    if uploaded_files and 'spectra_data' in locals() and spectra_data:
+    if uploaded_files and 'spectra_data' in locals() and spectra_data and ordered_spectra:
         # Apply common x range if selected
         current_spectra = spectra_data
         if common_x_range:
@@ -629,10 +565,14 @@ def main():
         with tab1:
             st.subheader("Raw Spectra")
             if filtered_spectra:
-                fig = create_plot(
+                fig = create_plot_with_broken_axis(
                     filtered_spectra, x_label, y_label, 
-                    "Raw Spectra", 
-                    x_range=x_ranges
+                    "Raw Spectra",
+                    offset_step=0,
+                    x_ranges=x_ranges,
+                    fill=False,
+                    normalized=False,
+                    use_cumulative_offset=False
                 )
                 st.pyplot(fig)
                 plt.close()
@@ -640,29 +580,34 @@ def main():
                 st.warning("No spectra selected")
         
         with tab2:
-            st.subheader("Normalized Spectra")
+            st.subheader(f"Normalized Spectra ({norm_method})")
             if filtered_norm_spectra:
-                fig = create_plot(
+                fig = create_plot_with_broken_axis(
                     filtered_norm_spectra, x_label, 
                     f"Normalized Intensity ({norm_method})", 
                     "Normalized Spectra",
-                    x_range=x_ranges,
-                    normalized=True
+                    offset_step=0,
+                    x_ranges=x_ranges,
+                    fill=False,
+                    normalized=True,
+                    use_cumulative_offset=False
                 )
                 st.pyplot(fig)
                 plt.close()
             else:
                 st.warning("No spectra selected")
-
+        
         with tab3:
             st.subheader(f"Raw Spectra with Cumulative Offset (step = {raw_offset_step})")
             if filtered_spectra:
-                fig = create_plot_with_cumulative_offset(
+                fig = create_plot_with_broken_axis(
                     filtered_spectra, x_label, y_label, 
                     f"Raw Spectra (offset step = {raw_offset_step})",
                     offset_step=raw_offset_step,
-                    x_range=x_ranges,
-                    normalized=False
+                    x_ranges=x_ranges,
+                    fill=False,
+                    normalized=False,
+                    use_cumulative_offset=True
                 )
                 st.pyplot(fig)
                 plt.close()
@@ -672,14 +617,15 @@ def main():
         with tab4:
             st.subheader(f"Normalized Spectra with Cumulative Offset (step = {norm_offset_step})")
             if filtered_norm_spectra:
-                fig = create_plot_with_cumulative_offset(
+                fig = create_plot_with_broken_axis(
                     filtered_norm_spectra, x_label, 
                     f"Normalized Intensity ({norm_method})", 
                     f"Normalized Spectra (offset step = {norm_offset_step})",
                     offset_step=norm_offset_step,
-                    x_range=x_ranges,
+                    x_ranges=x_ranges,
                     fill=fill_area,
-                    normalized=True
+                    normalized=True,
+                    use_cumulative_offset=True
                 )
                 st.pyplot(fig)
                 plt.close()
@@ -712,12 +658,24 @@ def main():
                         y = data['y'].values
                         
                         if x_ranges is not None:
-                            x, y = crop_to_ranges(x, y, x_ranges)
+                            # Crop to ranges for visualization
+                            x_cropped = []
+                            y_cropped = []
+                            for start, end in x_ranges:
+                                mask = (x >= start) & (x <= end)
+                                if np.any(mask):
+                                    x_cropped.extend(x[mask])
+                                    y_cropped.extend(y[mask])
+                            x = np.array(x_cropped)
+                            y = np.array(y_cropped)
                         
-                        ax.plot(x, y, color=spec['color'], linewidth=1.5, label=name, alpha=0.7)
+                        if len(x) == 0:
+                            continue
+                        
+                        ax.plot(x, y, color=spec['color'], linewidth=1.5, label=name.replace('.txt', ''), alpha=0.7)
                         
                         # Mark peaks
-                        spec_peaks = peaks_df[peaks_df['Spectrum'] == name]
+                        spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
                         for _, peak in spec_peaks.iterrows():
                             ax.axvline(peak['Peak position'], color=spec['color'], 
                                       linestyle='--', alpha=0.5, linewidth=1)
@@ -725,12 +683,13 @@ def main():
                                    f"{peak['Peak position']:.1f}", 
                                    fontsize=8, ha='center')
                     
-                    ax.set_xlabel(x_label)
-                    ax.set_ylabel(y_label)
-                    ax.set_title("Detected Peaks")
-                    ax.legend(loc='best')
-                    ax.tick_params(direction='out')
+                    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
+                    ax.set_title("Detected Peaks", fontsize=12, fontweight='bold')
+                    ax.legend(loc='best', fontsize=10, frameon=True, edgecolor='black', prop={'weight': 'bold'})
+                    ax.tick_params(direction='out', length=4, width=0.8)
                     
+                    plt.tight_layout()
                     st.pyplot(fig)
                     plt.close()
                 else:
@@ -754,7 +713,7 @@ def main():
                 if analyze_peaks_flag and 'peaks_df' in locals() and not peaks_df.empty:
                     for name in ordered_spectra:
                         if name in param_values:
-                            spec_peaks = peaks_df[peaks_df['Spectrum'] == name]
+                            spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
                             if not spec_peaks.empty:
                                 # Take the most intense peak
                                 main_peak = spec_peaks.loc[spec_peaks['Intensity'].idxmax()]
@@ -768,21 +727,21 @@ def main():
                     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
                     
                     axes[0].scatter(param_list, intensity_list, c='blue', alpha=0.6, s=50)
-                    axes[0].set_xlabel(param_label)
-                    axes[0].set_ylabel("Peak Intensity (a.u.)")
-                    axes[0].set_title("Intensity vs Parameter")
+                    axes[0].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes[0].set_ylabel("Peak Intensity (a.u.)", fontsize=11, fontweight='bold')
+                    axes[0].set_title("Intensity vs Parameter", fontsize=12, fontweight='bold')
                     axes[0].grid(True, alpha=0.3)
                     
                     axes[1].scatter(param_list, area_list, c='green', alpha=0.6, s=50)
-                    axes[1].set_xlabel(param_label)
-                    axes[1].set_ylabel("Peak Area")
-                    axes[1].set_title("Area vs Parameter")
+                    axes[1].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes[1].set_ylabel("Peak Area", fontsize=11, fontweight='bold')
+                    axes[1].set_title("Area vs Parameter", fontsize=12, fontweight='bold')
                     axes[1].grid(True, alpha=0.3)
                     
                     axes[2].scatter(param_list, position_list, c='red', alpha=0.6, s=50)
-                    axes[2].set_xlabel(param_label)
-                    axes[2].set_ylabel("Peak Position (cm⁻¹)")
-                    axes[2].set_title("Position vs Parameter")
+                    axes[2].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes[2].set_ylabel("Peak Position (cm⁻¹)", fontsize=11, fontweight='bold')
+                    axes[2].set_title("Position vs Parameter", fontsize=12, fontweight='bold')
                     axes[2].grid(True, alpha=0.3)
                     
                     plt.tight_layout()
@@ -791,7 +750,7 @@ def main():
                     
                     # Show correlation table
                     corr_data = pd.DataFrame({
-                        'Spectrum': [name for name in ordered_spectra if name in param_values],
+                        'Spectrum': [name.replace('.txt', '') for name in ordered_spectra if name in param_values],
                         param_label: param_list,
                         'Intensity': intensity_list,
                         'Area': area_list,
@@ -822,8 +781,8 @@ def main():
                 export_data = pd.DataFrame()
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
-                    export_data[f"{name}_x"] = data['x']
-                    export_data[f"{name}_y"] = data['y']
+                    export_data[f"{name.replace('.txt', '')}_x"] = data['x']
+                    export_data[f"{name.replace('.txt', '')}_y"] = data['y']
                 
                 csv = export_data.to_csv(index=False)
                 st.download_button(
@@ -839,8 +798,8 @@ def main():
                 export_norm = pd.DataFrame()
                 for name, spec in filtered_norm_spectra.items():
                     data = spec['data']
-                    export_norm[f"{name}_x"] = data['x']
-                    export_norm[f"{name}_y_norm"] = data['y']
+                    export_norm[f"{name.replace('.txt', '')}_x"] = data['x']
+                    export_norm[f"{name.replace('.txt', '')}_y_norm"] = data['y']
                 
                 csv_norm = export_norm.to_csv(index=False)
                 st.download_button(
@@ -854,7 +813,7 @@ def main():
             # Save current figure
             st.download_button(
                 label="💾 Instructions",
-                data="Spectra Analysis Tool v1.0\n\nFeatures:\n- Multiple spectra visualization\n- Normalization (max, area, custom peak)\n- Offset and fill options\n- Peak analysis\n- Parameter correlation\n- Data export",
+                data="Spectra Analysis Tool v1.0\n\nFeatures:\n- Multiple spectra visualization\n- Normalization (max, area, custom peak)\n- Individual offset for each spectrum\n- Multiple x-range selection with broken axis\n- Peak analysis\n- Parameter correlation\n- Data export",
                 file_name="instructions.txt",
                 mime="text/plain"
             )
@@ -874,13 +833,16 @@ def main():
         
         ### 📊 Features:
         - Raw and normalized spectra visualization
-        - Offset with adjustable value
-        - Fill under normalized spectra
-        - Custom x-axis ranges
+        - Cumulative offset (1st spectrum no offset, 2nd +step, 3rd +2×step, etc.)
+        - Multiple x-range selection with broken axis display
         - Peak detection and analysis
         - Parameter correlation (assign numeric values to spectra)
         - High-quality scientific plots
         - Data export in CSV format
+        
+        ### 📝 X-axis ranges format:
+        Enter ranges as: `100-150, 350-450, 600-800`
+        Each range will be displayed as a separate segment on the same graph with gaps between them.
         """)
 
 if __name__ == "__main__":
