@@ -527,13 +527,32 @@ def analyze_peaks(spectra_dict, x_ranges=None, peak_width=20):
 
 # Main app
 def main():
-    # Custom header
-    st.markdown("""
-    <div class="custom-header">
-        <h1>🔬 SpectrAnalys</h1>
-        <p>Advanced Spectroscopic Data Analysis Platform | High-Precision Peak Detection & Correlation Analysis</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Custom header with logo
+    import os
+    from PIL import Image
+    
+    # Check if logo exists
+    logo_path = "logo.png"
+    if os.path.exists(logo_path):
+        logo = Image.open(logo_path)
+        # Display logo centered with text below
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.image(logo, width=120, use_container_width=False)
+            st.markdown("""
+            <div style="text-align: center;">
+                <h1 style="margin: 0; color: white; font-size: 2rem; font-weight: 700;">SpectrAnalys</h1>
+                <p style="margin: 0.5rem 0 0 0; color: white; opacity: 0.9;">Advanced Spectroscopic Data Analysis Platform | High-Precision Peak Detection & Correlation Analysis</p>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        # Fallback to text header if logo not found
+        st.markdown("""
+        <div class="custom-header">
+            <h1>🔬 SpectrAnalys</h1>
+            <p>Advanced Spectroscopic Data Analysis Platform | High-Precision Peak Detection & Correlation Analysis</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
