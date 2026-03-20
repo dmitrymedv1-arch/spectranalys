@@ -6,6 +6,7 @@ from scipy.signal import find_peaks
 from scipy.integrate import simpson
 from io import StringIO
 import re
+import matplotlib.pyplot as plt
 
 # Set page config
 st.set_page_config(
@@ -271,19 +272,28 @@ def main():
                     for i, name in enumerate(selected_spectra):
                         ordered_spectra.append(name)
                     
-                    # Assign colors
+                    # Assign colors with default distinct colors
                     colors = {}
                     st.markdown("---")
                     st.header("🎨 Color Assignment")
+                    
+                    # Define default color palette
+                    default_colors = [
+                        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+                    ]
                     
                     for i, name in enumerate(ordered_spectra):
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.markdown(f"**{name}**")
                         with col2:
+                            # Use default color from palette, cycling if more spectra than colors
+                            default_color = default_colors[i % len(default_colors)]
                             colors[name] = st.color_picker(
                                 f"Color {i+1}",
-                                value=f"#{plt.cm.tab10(i)[0:3].tolist() if hasattr(plt.cm.tab10(i), 'tolist') else 'ff0000'}",
+                                value=default_color,
                                 key=f"color_{name}"
                             )
                     
