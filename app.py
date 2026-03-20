@@ -166,7 +166,10 @@ def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title,
     
     # Create figure with subplots for each range
     n_ranges = len(x_ranges)
-    fig, axes = plt.subplots(1, n_ranges, figsize=(5 * n_ranges, 6), 
+    
+    # Adjust figure size based on number of ranges
+    fig_width = max(10, 4 * n_ranges)
+    fig, axes = plt.subplots(1, n_ranges, figsize=(fig_width, 6), 
                               sharey=True, gridspec_kw={'wspace': 0.05})
     
     if n_ranges == 1:
@@ -174,6 +177,23 @@ def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title,
     
     # Sort spectra to maintain consistent order
     spectra_items = list(spectra_dict.items())
+    
+    # Find global y limits for consistent scaling
+    all_y_values = []
+    for name, spec in spectra_items:
+        data = spec['data']
+        y_full = data['y'].values
+        if use_cumulative_offset:
+            idx = spectra_items.index((name, spec))
+            offset = idx * offset_step
+            y_full = y_full + offset
+        all_y_values.extend(y_full)
+    
+    y_min = np.min(all_y_values) if all_y_values else 0
+    y_max = np.max(all_y_values) if all_y_values else 1
+    y_padding = (y_max - y_min) * 0.05
+    y_min = y_min - y_padding
+    y_max = y_max + y_padding
     
     for ax_idx, (ax, (start, end)) in enumerate(zip(axes, x_ranges)):
         # Store handles and labels for legend (only for first subplot to avoid duplication)
@@ -206,11 +226,11 @@ def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title,
             y_plot = y + offset
             
             # Plot
-            if fill and normalized and not use_cumulative_offset:
-                ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
-                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-            elif fill and normalized and use_cumulative_offset:
+            if fill and normalized and use_cumulative_offset:
                 ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            elif fill and normalized:
+                ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
             else:
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
@@ -220,18 +240,25 @@ def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title,
                 handles.append(line_handle[0])
                 labels.append(display_name)
         
-        ax.set_xlabel(f'{x_label}\n[{start:.0f} - {end:.0f}]', fontsize=10, fontweight='bold')
+        # Set x label for each subplot with range info
+        ax.set_xlabel(f'{start:.0f} – {end:.0f}', fontsize=10, fontweight='normal')
         ax.tick_params(direction='out', length=4, width=0.8)
         
-        # Add vertical lines at range boundaries
-        ax.axvline(start, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        ax.axvline(end, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        # Add subtle vertical lines at range boundaries
+        ax.axvline(start, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+        ax.axvline(end, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
         
         # Set x limits
         ax.set_xlim(start, end)
+        
+        # Set y limits for consistent scaling
+        ax.set_ylim(y_min, y_max)
     
-    # Set y label for all subplots
+    # Set common y label
     axes[0].set_ylabel(y_label, fontsize=11, fontweight='bold')
+    
+    # Add common x-axis label at the bottom of the figure
+    fig.text(0.5, 0.02, x_label, ha='center', fontsize=11, fontweight='bold')
     
     # Add legend to first subplot
     if handles:
@@ -241,8 +268,11 @@ def create_plot_with_broken_axis(spectra_dict, x_label, y_label, title,
             text.set_color(handle.get_color())
     
     # Set main title
-    fig.suptitle(title, fontsize=12, fontweight='bold')
+    fig.suptitle(title, fontsize=12, fontweight='bold', y=0.98)
+    
+    # Adjust layout to make room for common x-label
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
     
     return fig
 
