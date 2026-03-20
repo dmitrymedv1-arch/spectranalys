@@ -198,8 +198,8 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
     
     # Create legend with proper colors
     if handles:
-        legend = ax.legend(handles, labels, loc='best', fontsize=10, 
-                          frameon=True, edgecolor='black')
+        legend = ax.legend(handles, labels, loc='best', fontsize=12, 
+                          frameon=True, edgecolor='black', prop={'weight': 'bold'})
         # Make legend text colors match line colors
         for text, handle in zip(legend.get_texts(), handles):
             text.set_color(handle.get_color())
