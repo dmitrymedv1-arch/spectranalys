@@ -209,17 +209,20 @@ def create_plot(spectra_dict, x_label, y_label, title, offset=0, fill=False,
     plt.tight_layout()
     return fig
 
-def create_plot_with_individual_offset(spectra_dict, x_label, y_label, title, 
-                                        offset_dict, x_range=None, fill=False, 
+def create_plot_with_cumulative_offset(spectra_dict, x_label, y_label, title, 
+                                        offset_step, x_range=None, fill=False, 
                                         normalized=False):
-    """Create scientific plot with individual offsets for each spectrum"""
+    """Create scientific plot with cumulative offsets (1st: 0, 2nd: +step, 3rd: +2*step, ...)"""
     fig, ax = plt.subplots(figsize=(10, 6))
     
     # Store handles and labels for legend
     handles = []
     labels = []
     
-    for name, spec in spectra_dict.items():
+    # Sort spectra to maintain consistent order
+    spectra_items = list(spectra_dict.items())
+    
+    for idx, (name, spec) in enumerate(spectra_items):
         data = spec['data']
         x = data['x'].values
         y = data['y'].values
@@ -235,8 +238,8 @@ def create_plot_with_individual_offset(spectra_dict, x_label, y_label, title,
         if len(x) == 0:
             continue
         
-        # Apply individual offset
-        offset = offset_dict.get(name, 0)
+        # Apply cumulative offset: first spectrum gets 0, second gets offset_step, third gets 2*offset_step, etc.
+        offset = idx * offset_step
         y_plot = y + offset
         
         # Plot
@@ -425,33 +428,29 @@ def main():
                             except:
                                 st.warning("Invalid range format")
                     
-                    # Offset options
+                    # Offset options for raw spectra
                     st.subheader("Offset for Raw Spectra")
-                    st.info("Raw spectra can have high intensity values (0-100000+)")
-                    raw_offset_values = {}
-                    for i, name in enumerate(ordered_spectra):
-                        raw_offset_values[name] = st.slider(
-                            f"Offset for {name.replace('.txt', '')}",
-                            min_value=0.0,
-                            max_value=50000.0,
-                            value=0.0,
-                            step=100.0,
-                            key=f"raw_offset_{name}"
-                        )
+                    st.info("Raw spectra offset - each subsequent spectrum gets +offset")
+                    raw_offset_step = st.slider(
+                        "Offset step for raw spectra",
+                        min_value=0.0,
+                        max_value=50000.0,
+                        value=1000.0,
+                        step=100.0,
+                        key="raw_offset_step"
+                    )
                     
                     st.markdown("---")
                     st.subheader("Offset for Normalized Spectra")
-                    st.info("Normalized spectra range from 0 to 1")
-                    norm_offset_values = {}
-                    for i, name in enumerate(ordered_spectra):
-                        norm_offset_values[name] = st.slider(
-                            f"Offset for {name.replace('.txt', '')}",
-                            min_value=0.0,
-                            max_value=5.0,
-                            value=0.0,
-                            step=0.1,
-                            key=f"norm_offset_{name}"
-                        )
+                    st.info("Normalized spectra offset - each subsequent spectrum gets +offset")
+                    norm_offset_step = st.slider(
+                        "Offset step for normalized spectra",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=0.5,
+                        step=0.05,
+                        key="norm_offset_step"
+                    )
                     
                     fill_area = st.checkbox("Fill area under normalized spectra", value=False)
                     
@@ -556,12 +555,12 @@ def main():
                 st.warning("No spectra selected")
 
         with tab3:
-            st.subheader("Raw Spectra with Individual Offsets")
+            st.subheader(f"Raw Spectra with Cumulative Offset (step = {raw_offset_step})")
             if filtered_spectra:
-                fig = create_plot_with_individual_offset(
+                fig = create_plot_with_cumulative_offset(
                     filtered_spectra, x_label, y_label, 
-                    "Raw Spectra with Individual Offsets",
-                    offset_dict=raw_offset_values,
+                    f"Raw Spectra (offset step = {raw_offset_step})",
+                    offset_step=raw_offset_step,
                     x_range=x_ranges,
                     normalized=False
                 )
@@ -571,13 +570,13 @@ def main():
                 st.warning("No spectra selected")
         
         with tab4:
-            st.subheader("Normalized Spectra with Individual Offsets")
+            st.subheader(f"Normalized Spectra with Cumulative Offset (step = {norm_offset_step})")
             if filtered_norm_spectra:
-                fig = create_plot_with_individual_offset(
+                fig = create_plot_with_cumulative_offset(
                     filtered_norm_spectra, x_label, 
                     f"Normalized Intensity ({norm_method})", 
-                    "Normalized Spectra with Individual Offsets",
-                    offset_dict=norm_offset_values,
+                    f"Normalized Spectra (offset step = {norm_offset_step})",
+                    offset_step=norm_offset_step,
                     x_range=x_ranges,
                     fill=fill_area,
                     normalized=True
