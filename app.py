@@ -538,7 +538,7 @@ def main():
         # Display logo centered with text below
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.image(logo, width=120, use_container_width=False)
+            st.image(logo, width=250, use_container_width=False)
             st.markdown("""
             <div style="text-align: center;">
                 <h1 style="margin: 0; color: white; font-size: 2rem; font-weight: 700;">SpectrAnalys</h1>
