@@ -1041,47 +1041,44 @@ Correlation Analysis: {param_correlation}
             )
         
         st.markdown('</div>', unsafe_allow_html=True)
-    
+
     else:
         # Welcome screen with instructions
+        st.markdown("## 🎯 Welcome to SpectrAnalys")
+        st.markdown("Advanced spectroscopic data analysis platform for researchers and scientists")
+        
+        st.markdown("### 📖 Quick Start Guide:")
         st.markdown("""
-        <div class="scientific-card">
-            <h3>🎯 Welcome to SpectrAnalys</h3>
-            <p>Advanced spectroscopic data analysis platform for researchers and scientists</p>
-            
-            <h4>📖 Quick Start Guide:</h4>
-            <ol>
-                <li><strong>Upload Data</strong> - Select one or more .txt files with two columns (x y, tab-separated)</li>
-                <li><strong>Configure Analysis</strong> - Choose spectra, assign colors, set normalization and offset parameters</li>
-                <li><strong>Visualize</strong> - Explore combined spectra visualization with multiple display modes</li>
-                <li><strong>Analyze Peaks</strong> - Detect and characterize spectral peaks automatically</li>
-                <li><strong>Correlate Parameters</strong> - Investigate relationships between spectral features and experimental parameters</li>
-                <li><strong>Export Results</strong> - Download processed data, plots, and analysis results</li>
-            </ol>
-            
-            <h4>✨ Key Features:</h4>
-            <ul>
-                <li>🔬 <strong>Multi-Mode Visualization</strong> - Raw, normalized, and offset spectra in one comprehensive view</li>
-                <li>📊 <strong>Broken Axis Support</strong> - Display multiple x-axis ranges with gaps between them</li>
-                <li>🎨 <strong>Customizable Colors</strong> - Individual color assignment for each spectrum</li>
-                <li>📈 <strong>Automatic Peak Detection</strong> - Find peaks, calculate areas, and analyze intensities</li>
-                <li>🔗 <strong>Parameter Correlation</strong> - Correlate spectral features with experimental parameters</li>
-                <li>💾 <strong>Data Export</strong> - Download processed data in CSV format with publication-ready plots</li>
-                <li>📐 <strong>Multiple Normalization Methods</strong> - Maximum intensity, area, or custom peak range normalization</li>
-                <li>📏 <strong>Cumulative Offset</strong> - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)</li>
-            </ul>
-            
-            <h4>📁 File Format:</h4>
-            <p>Your .txt files should contain two columns separated by tabs:</p>
-            <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace; white-space: pre;">
+        1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
+        2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
+        3. **Visualize** - Explore combined spectra visualization with multiple display modes
+        4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
+        5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
+        6. **Export Results** - Download processed data, plots, and analysis results
+        """)
+        
+        st.markdown("### ✨ Key Features:")
+        st.markdown("""
+        - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
+        - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
+        - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
+        - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
+        - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
+        - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
+        - 📐 **Multiple Normalization Methods** - Maximum intensity, area, or custom peak range normalization
+        - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
+        """)
+        
+        st.markdown("### 📁 File Format:")
+        st.markdown("Your .txt files should contain two columns separated by tabs:")
+        st.code("""
 100.5    1250.3
 101.2    1248.7
 102.0    1251.5
-...</pre>
-            
-            <p><strong>Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!</strong></p>
-        </div>
-        """, unsafe_allow_html=True)
+...
+        """, language="text")
+        
+        st.markdown("**Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!**")
     
     # Footer
     st.markdown("""
