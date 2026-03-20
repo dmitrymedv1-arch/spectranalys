@@ -449,7 +449,8 @@ def main():
                     st.subheader("Normalization")
                     norm_method = st.selectbox(
                         "Normalization method",
-                        ["None", "Maximum intensity", "Area", "Peak intensity (range)"]
+                        ["Maximum intensity", "Area", "Peak intensity (range)"],
+                        index=0  # "Maximum intensity" selected by default
                     )
                     
                     norm_range = None
