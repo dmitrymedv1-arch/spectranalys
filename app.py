@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy.integrate import simpson
-from io import StringIO
+from io import StringIO, BytesIO
 import re
 from datetime import datetime
 import base64
@@ -781,10 +781,11 @@ def main():
                 plt.close()
                 
                 # Download button for combined plot
-                buf = StringIO()
+                from io import BytesIO
+                buf = BytesIO()
                 fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
                 buf.seek(0)
-                b64 = base64.b64encode(buf.read()).decode()
+                b64 = base64.b64encode(buf.getvalue()).decode()
                 st.markdown(f"""
                 <div style="text-align: center; margin-top: 1rem;">
                     <a href="data:image/png;base64,{b64}" download="spectra_combined_plot.png">
