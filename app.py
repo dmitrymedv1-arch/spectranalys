@@ -327,6 +327,7 @@ def crop_to_ranges_multi(x, y, ranges):
     return segments
 
 # Function to create combined plot with all four visualization types
+# Function to create combined plot with all four visualization types
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
                          norm_method, x_ranges=None):
@@ -449,10 +450,17 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             ax.set_ylabel(yl, fontsize=10, fontweight='bold')
             ax.set_title(subplot_title, fontsize=11, fontweight='bold')
         
-        # Add legend
+        # Add legend with correct order for offset plots
         if handles:
-            legend = ax.legend(handles, labels, loc='best', fontsize=8,
-                              frameon=True, edgecolor='black', prop={'weight': 'bold'})
+            # For offset plots, reverse the legend order so top curve appears first
+            if use_offset:
+                legend = ax.legend(reversed(handles), reversed(labels), loc='best', fontsize=8,
+                                  frameon=True, edgecolor='black', prop={'weight': 'bold'})
+            else:
+                legend = ax.legend(handles, labels, loc='best', fontsize=8,
+                                  frameon=True, edgecolor='black', prop={'weight': 'bold'})
+            
+            # Set legend text colors to match line colors
             for text, handle in zip(legend.get_texts(), handles):
                 text.set_color(handle.get_color())
         
