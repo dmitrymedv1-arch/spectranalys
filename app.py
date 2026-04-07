@@ -327,10 +327,11 @@ def crop_to_ranges_multi(x, y, ranges):
     return segments
 
 # Function to create combined plot with all four visualization types
+# Function to create combined plot with all four visualization types (vertical layout)
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
                          norm_method, x_ranges=None):
-    """Create scientific plot with all four visualization types in subplots"""
+    """Create scientific plot with all four visualization types in vertical subplots"""
     
     # Prepare normalized spectra
     normalized_spectra = {}
@@ -347,16 +348,16 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             'color': spec['color']
         }
     
-    # Create figure with 4 subplots (2x2 grid)
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    # Create figure with 4 subplots vertically (4 rows, 1 column)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 18))
     fig.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
     
     # Define the four visualization types
     viz_configs = [
-        (axes[0, 0], "Raw Spectra", spectra_dict, 0, False, False, False, x_label, y_label),
-        (axes[0, 1], f"Normalized Spectra ({norm_method})", normalized_spectra, 0, False, True, False, x_label, f"Normalized Intensity ({norm_method})"),
-        (axes[1, 0], f"Raw Spectra + Offset (step = {raw_offset_step})", spectra_dict, raw_offset_step, False, False, True, x_label, y_label),
-        (axes[1, 1], f"Normalized Spectra + Offset (step = {norm_offset_step})", normalized_spectra, norm_offset_step, fill_area, True, True, x_label, f"Normalized Intensity ({norm_method})")
+        (axes[0], "Raw Spectra", spectra_dict, 0, False, False, False, x_label, y_label),
+        (axes[1], f"Normalized Spectra ({norm_method})", normalized_spectra, 0, False, True, False, x_label, f"Normalized Intensity ({norm_method})"),
+        (axes[2], f"Raw Spectra + Offset (step = {raw_offset_step})", spectra_dict, raw_offset_step, False, False, True, x_label, y_label),
+        (axes[3], f"Normalized Spectra + Offset (step = {norm_offset_step})", normalized_spectra, norm_offset_step, fill_area, True, True, x_label, f"Normalized Intensity ({norm_method})")
     ]
     
     for ax, subplot_title, spectra, offset_step, fill, normalized, use_offset, xl, yl in viz_configs:
@@ -436,8 +437,11 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                     else:
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
                     
-                    # Add to legend only for first range
+                    # Add to handles only for first range
                     if range_idx == 0 and idx == 0:
+                        handles.append(line_handle[0])
+                        labels.append(display_name)
+                    elif range_idx == 0:
                         handles.append(line_handle[0])
                         labels.append(display_name)
                 
@@ -449,8 +453,9 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             ax.set_ylabel(yl, fontsize=10, fontweight='bold')
             ax.set_title(subplot_title, fontsize=11, fontweight='bold')
         
-        # Add legend with correct order for offset plots
+        # Add legend outside the plot to the right
         if handles:
+            # For offset plots, reverse the legend order so top curve appears first
             if use_offset:
                 # Create reversed lists for legend
                 reversed_handles = list(reversed(handles))
@@ -486,7 +491,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
         ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95, hspace=0.3, wspace=0.25)
+    plt.subplots_adjust(top=0.95, hspace=0.4, right=0.85)  # right=0.85 reserves space for legends
     
     return fig
 
