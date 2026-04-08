@@ -375,30 +375,26 @@ def crop_to_ranges_multi(x, y, ranges):
     return segments
 
 # Function to create gradient fill between y and baseline
-def gradient_fill_between(ax, x, y, baseline, color, alpha=0.3, n_layers=20):
-    """Create gradient fill from line to baseline with fading transparency"""
+def gradient_fill_between(ax, x, y, baseline, color, alpha=0.3):
+    """Create gradient fill from line to baseline using polygon collection"""
+    from matplotlib.collections import PolyCollection
+    import matplotlib.pyplot as plt
+    
+    verts = []
     for i in range(len(x) - 1):
+        # Create vertices for polygon between x[i] and x[i+1]
         x_seg = [x[i], x[i+1], x[i+1], x[i]]
-        
-        # Create multiple layers with decreasing alpha from top to bottom
-        for layer in range(n_layers):
-            # Calculate normalized layer position (0 at top/line, 1 at bottom/baseline)
-            layer_ratio = layer / n_layers
-            
-            # Calculate y position for this layer (interpolate between y and baseline)
-            y_top = y[i] - (y[i] - baseline) * (layer_ratio)
-            y_next_top = y[i+1] - (y[i+1] - baseline) * (layer_ratio)
-            y_bottom = y[i] - (y[i] - baseline) * ((layer + 1) / n_layers)
-            y_next_bottom = y[i+1] - (y[i+1] - baseline) * ((layer + 1) / n_layers)
-            
-            # Alpha decreases from top to bottom
-            layer_alpha = alpha * (1 - layer_ratio)
-            
-            # Create polygon for this layer
-            y_seg = [y_top, y_next_top, y_next_bottom, y_bottom]
-            
-            # Fill layer
-            ax.fill(x_seg, y_seg, color=color, alpha=layer_alpha, linewidth=0)
+        y_seg = [y[i], y[i+1], baseline, baseline]
+        verts.append(list(zip(x_seg, y_seg)))
+    
+    # Create polygon collection with gradient-like appearance using alpha mapping
+    poly = PolyCollection(verts, facecolor=color, alpha=alpha, linewidth=0)
+    ax.add_collection(poly)
+    
+    # Add additional translucent layers for depth
+    for layer_alpha in np.linspace(alpha*0.3, alpha*0.8, 5):
+        poly_light = PolyCollection(verts, facecolor=color, alpha=layer_alpha*0.3, linewidth=0)
+        ax.add_collection(poly_light)
 
 # Function to create combined plot with all four visualization types (vertical layout)
 def create_combined_plot(spectra_dict, x_label, y_label, title,
