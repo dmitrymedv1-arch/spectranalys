@@ -379,7 +379,8 @@ def gradient_fill(ax, x, y, color, offset=0):
 def create_individual_plot(spectra_dict, x_label, y_label, title,
                            offset_step, fill_area, normalized, use_offset,
                            x_ranges, subtract_min_intensity, fill_alpha,
-                           show_grid, line_width, fig_width, fig_height):
+                           show_grid, line_width, fig_width, fig_height,
+                           legend_fontsize=8, legend_position="right", legend_offset=1.02):
     """Create individual scientific plot with download button"""
     
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -422,7 +423,6 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
         
         ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
         ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
-        # Title removed as requested
         
     else:
         # Broken axis plot with multiple x-ranges
@@ -463,10 +463,7 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                     line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
                 
                 # Add to handles only for first range
-                if range_idx == 0 and idx == 0:
-                    handles.append(line_handle[0])
-                    labels.append(display_name)
-                elif range_idx == 0:
+                if range_idx == 0:
                     handles.append(line_handle[0])
                     labels.append(display_name)
             
@@ -476,17 +473,30 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
         
         ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
         ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
-        # Title removed as requested
     
-    # Add legend outside the plot to the right
+    # Add legend with customizable settings
     if handles:
-        if use_offset:
+        # Adjust legend position
+        if legend_position == "right":
+            bbox_anchor = (legend_offset, 0.5)
+            loc = 'center left'
+        elif legend_position == "best":
+            bbox_anchor = None
+            loc = 'best'
+        else:
+            # For specific positions like 'upper right', 'upper left', etc.
+            bbox_anchor = None
+            loc = legend_position
+        
+        # Create legend
+        if use_offset and legend_position == "right":
+            # Reverse order for offset plots
             reversed_handles = list(reversed(handles))
             reversed_labels = list(reversed(labels))
             legend = ax.legend(reversed_handles, reversed_labels, 
-                              loc='center left', 
-                              bbox_to_anchor=(1.02, 0.5),
-                              fontsize=8,
+                              loc=loc, 
+                              bbox_to_anchor=bbox_anchor,
+                              fontsize=legend_fontsize,
                               frameon=True, 
                               edgecolor='black', 
                               prop={'weight': 'bold'})
@@ -494,22 +504,38 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                 text.set_color(handle.get_color())
         else:
             legend = ax.legend(handles, labels, 
-                              loc='center left', 
-                              bbox_to_anchor=(1.02, 0.5),
-                              fontsize=8,
+                              loc=loc, 
+                              bbox_to_anchor=bbox_anchor,
+                              fontsize=legend_fontsize,
                               frameon=True, 
                               edgecolor='black', 
                               prop={'weight': 'bold'})
-            for text, handle in zip(legend.get_texts(), handles):
-                text.set_color(handle.get_color())
+            if legend_position == "right":
+                for text, handle in zip(legend.get_texts(), handles):
+                    text.set_color(handle.get_color())
+        
+        # Adjust legend box if it's too large
+        if len(handles) > 10:
+            legend._legend_box.align = "left"
+            # Set number of columns for large legends
+            if len(handles) > 15:
+                legend._ncol = 2
     
     ax.tick_params(direction='in', length=5, width=1)
     if show_grid:
         ax.grid(True, alpha=0.3, linestyle='--')
     else:
         ax.grid(False)
-    plt.tight_layout()
-    plt.subplots_adjust(right=0.85)
+    
+    # Dynamic right margin adjustment based on legend size and position
+    if legend_position == "right" and len(handles) > 0:
+        # Calculate margin based on number of spectra and font size
+        estimated_legend_width = min(0.35, 0.15 + (len(handles) * legend_fontsize / 300))
+        right_margin = min(0.95, legend_offset + estimated_legend_width)
+        plt.tight_layout()
+        plt.subplots_adjust(right=right_margin)
+    else:
+        plt.tight_layout()
     
     return fig
 
@@ -517,7 +543,8 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
                          norm_method, x_ranges=None, fill_alpha=0.3,
-                         show_grid=True, line_width=1.5):
+                         show_grid=True, line_width=1.5,
+                         legend_fontsize=8, legend_position="right", legend_offset=1.02):
     """Create scientific plot with all four visualization types in vertical subplots"""
     
     # Prepare normalized spectra
@@ -537,7 +564,6 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
     
     # Create figure with 4 subplots vertically (4 rows, 1 column)
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
-    # Title removed from figure as requested
     
     # Define the four visualization types - titles removed
     viz_configs = [
@@ -583,12 +609,9 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             
             ax.set_xlabel(xl, fontsize=10, fontweight='bold')
             ax.set_ylabel(yl, fontsize=10, fontweight='bold')
-            # Title removed as requested
             
         else:
             # Broken axis plot with multiple x-ranges
-            n_ranges = len(x_ranges)
-            
             for range_idx, (start, end) in enumerate(x_ranges):
                 for idx, (name, spec) in enumerate(spectra_items):
                     data = spec['data']
@@ -625,10 +648,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
                     
                     # Add to handles only for first range
-                    if range_idx == 0 and idx == 0:
-                        handles.append(line_handle[0])
-                        labels.append(display_name)
-                    elif range_idx == 0:
+                    if range_idx == 0:
                         handles.append(line_handle[0])
                         labels.append(display_name)
                 
@@ -638,41 +658,50 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             
             ax.set_xlabel(xl, fontsize=10, fontweight='bold')
             ax.set_ylabel(yl, fontsize=10, fontweight='bold')
-            # Title removed as requested
         
-        # Add legend outside the plot to the right
+        # Add legend with customizable settings
         if handles:
-            # For offset plots, reverse the legend order so top curve appears first
-            if use_offset:
-                # Create reversed lists for legend
+            # Adjust legend position
+            if legend_position == "right":
+                bbox_anchor = (legend_offset, 0.5)
+                loc = 'center left'
+            elif legend_position == "best":
+                bbox_anchor = None
+                loc = 'best'
+            else:
+                bbox_anchor = None
+                loc = legend_position
+            
+            # Create legend
+            if use_offset and legend_position == "right":
                 reversed_handles = list(reversed(handles))
                 reversed_labels = list(reversed(labels))
-                
-                # Place legend outside the plot - to the right
                 legend = ax.legend(reversed_handles, reversed_labels, 
-                                  loc='center left', 
-                                  bbox_to_anchor=(1.02, 0.5),
-                                  fontsize=8,
+                                  loc=loc, 
+                                  bbox_to_anchor=bbox_anchor,
+                                  fontsize=legend_fontsize,
                                   frameon=True, 
                                   edgecolor='black', 
                                   prop={'weight': 'bold'})
-                
-                # Set legend text colors to match line colors using reversed handles
                 for text, handle in zip(legend.get_texts(), reversed_handles):
                     text.set_color(handle.get_color())
             else:
-                # Place legend outside the plot - to the right
                 legend = ax.legend(handles, labels, 
-                                  loc='center left', 
-                                  bbox_to_anchor=(1.02, 0.5),
-                                  fontsize=8,
+                                  loc=loc, 
+                                  bbox_to_anchor=bbox_anchor,
+                                  fontsize=legend_fontsize,
                                   frameon=True, 
                                   edgecolor='black', 
                                   prop={'weight': 'bold'})
-                
-                # Set legend text colors to match line colors
-                for text, handle in zip(legend.get_texts(), handles):
-                    text.set_color(handle.get_color())
+                if legend_position == "right":
+                    for text, handle in zip(legend.get_texts(), handles):
+                        text.set_color(handle.get_color())
+            
+            # Adjust legend box if it's too large
+            if len(handles) > 10:
+                legend._legend_box.align = "left"
+                if len(handles) > 15:
+                    legend._ncol = 2
         
         ax.tick_params(direction='in', length=5, width=1)
         if show_grid:
@@ -680,8 +709,14 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
         else:
             ax.grid(False)
     
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.95, hspace=0.4, right=0.85)  # right=0.85 reserves space for legends
+    # Adjust layout with dynamic right margin
+    if legend_position == "right":
+        right_margin = min(0.92, legend_offset + 0.05)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.95, hspace=0.4, right=right_margin)
+    else:
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.95, hspace=0.4)
     
     return fig
 
@@ -1011,6 +1046,36 @@ def main():
                         index=2
                     )
                     fig_width, fig_height = fig_size_options[selected_size]
+
+                    # Legend settings
+                    st.markdown("#### 🏷️ Legend Settings")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        legend_fontsize = st.slider(
+                            "Legend font size",
+                            min_value=4,
+                            max_value=16,
+                            value=8,
+                            step=1,
+                            key="legend_fontsize"
+                        )
+                    with col2:
+                        legend_position = st.selectbox(
+                            "Legend position",
+                            options=["right", "best", "upper right", "upper left", "lower left", "lower right"],
+                            index=0,
+                            key="legend_position"
+                        )
+                    
+                    # Legend size (width adjustment)
+                    legend_offset = st.slider(
+                        "Legend offset from plot (0.5-2.0)",
+                        min_value=0.5,
+                        max_value=2.0,
+                        value=1.02,
+                        step=0.02,
+                        help="Higher value moves legend further right (for right position)"
+                    )
                     
                     # Peak analysis options
                     st.markdown("---")
@@ -1096,7 +1161,10 @@ def main():
                         'peak_width': peak_width if analyze_peaks_flag else 20,
                         'param_correlation': param_correlation,
                         'param_values': param_values if param_correlation else None,
-                        'param_label': param_label if param_correlation else "Parameter"
+                        'param_label': param_label if param_correlation else "Parameter",
+                        'legend_fontsize': legend_fontsize,
+                        'legend_position': legend_position,
+                        'legend_offset': legend_offset
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1233,7 +1301,10 @@ def main():
                     spectra, x_label, yl, "",
                     offset_step, fill, normalized, use_offset,
                     x_ranges, subtract_min_intensity, fill_alpha,
-                    show_grid, line_width, fig_width, fig_height
+                    show_grid, line_width, fig_width, fig_height,
+                    legend_fontsize=cached['legend_fontsize'],
+                    legend_position=cached['legend_position'],
+                    legend_offset=cached['legend_offset']
                 )
                 st.pyplot(fig)
                 
