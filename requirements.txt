@@ -7,4 +7,3 @@ scipy
 plotly
 scienceplots
 kaleido
-
