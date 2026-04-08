@@ -1010,36 +1010,249 @@ def main():
         with tab1:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("Comprehensive Spectra Analysis")
-            st.markdown("*All visualization modes combined for comprehensive spectral comparison*")
+            st.markdown("*Four independent visualization modes - each can be viewed in fullscreen*")
             
             if filtered_spectra:
-                fig = create_combined_plot(
-                    filtered_spectra, x_label, y_label,
-                    "SpectrAnalys - Multi-Mode Spectral Visualization",
-                    raw_offset_step, norm_offset_step, fill_area,
-                    norm_method, x_ranges, subtract_min_norm, 
-                    gradient_fill, fig_width, fig_height
-                )
-                st.pyplot(fig)
-                plt.close()
+                # Create 4 separate tabs for each visualization type
+                viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
+                    "📊 Raw Spectra",
+                    "📈 Normalized Spectra", 
+                    "📉 Raw Spectra + Offset",
+                    "🎨 Normalized Spectra + Offset"
+                ])
                 
-                # Download button for combined plot
-                from io import BytesIO
-                buf = BytesIO()
-                fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-                buf.seek(0)
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                st.markdown(f"""
-                <div style="text-align: center; margin-top: 1rem;">
-                    <a href="data:image/png;base64,{b64}" download="spectra_combined_plot.png">
-                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                       color: white; border: none; border-radius: 8px; 
-                                       padding: 0.5rem 1rem; cursor: pointer;">
-                            📥 Download Combined Plot (PNG)
-                        </button>
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
+                # Prepare normalized spectra for independent use
+                normalized_spectra_independent = {}
+                for name, spec in filtered_spectra.items():
+                    data = spec['data']
+                    y_norm = normalize_spectrum(
+                        data['x'].values,
+                        data['y'].values,
+                        norm_method,
+                        None,
+                        subtract_min_norm
+                    )
+                    normalized_spectra_independent[name] = {
+                        'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
+                        'color': spec['color']
+                    }
+                
+                # Tab 1: Raw Spectra
+                with viz_tab1:
+                    st.markdown("**Raw Spectra - No normalization, no offset**")
+                    fig1, ax1 = plt.subplots(figsize=(fig_width, fig_height/2))
+                    
+                    for idx, (name, spec) in enumerate(filtered_spectra.items()):
+                        data = spec['data']
+                        x = data['x'].values
+                        y = data['y'].values
+                        color = spec['color']
+                        display_name = name.replace('.txt', '')
+                        
+                        ax1.plot(x, y, color=color, linewidth=1.5, label=display_name)
+                    
+                    ax1.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax1.set_ylabel(y_label, fontsize=11, fontweight='bold')
+                    ax1.set_title("Raw Spectra", fontsize=12, fontweight='bold')
+                    ax1.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
+                    ax1.tick_params(direction='in', length=5, width=1)
+                    ax1.grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig1)
+                    
+                    # Download button for raw spectra
+                    buf1 = BytesIO()
+                    fig1.savefig(buf1, format='png', dpi=300, bbox_inches='tight')
+                    buf1.seek(0)
+                    b64_1 = base64.b64encode(buf1.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64_1}" download="raw_spectra.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
+                                📥 Download Raw Spectra (PNG)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig1)
+                
+                # Tab 2: Normalized Spectra
+                with viz_tab2:
+                    st.markdown(f"**Normalized Spectra - Method: {norm_method}**")
+                    fig2, ax2 = plt.subplots(figsize=(fig_width, fig_height/2))
+                    
+                    for idx, (name, spec) in enumerate(normalized_spectra_independent.items()):
+                        data = spec['data']
+                        x = data['x'].values
+                        y = data['y'].values
+                        color = spec['color']
+                        display_name = name.replace('.txt', '')
+                        
+                        ax2.plot(x, y, color=color, linewidth=1.5, label=display_name)
+                    
+                    ax2.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax2.set_ylabel(f"Normalized Intensity ({norm_method})", fontsize=11, fontweight='bold')
+                    ax2.set_title(f"Normalized Spectra ({norm_method})", fontsize=12, fontweight='bold')
+                    ax2.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
+                    ax2.tick_params(direction='in', length=5, width=1)
+                    ax2.grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig2)
+                    
+                    # Download button for normalized spectra
+                    buf2 = BytesIO()
+                    fig2.savefig(buf2, format='png', dpi=300, bbox_inches='tight')
+                    buf2.seek(0)
+                    b64_2 = base64.b64encode(buf2.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64_2}" download="normalized_spectra.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
+                                📥 Download Normalized Spectra (PNG)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig2)
+                
+                # Tab 3: Raw Spectra + Offset
+                with viz_tab3:
+                    st.markdown(f"**Raw Spectra with Cumulative Offset (step = {raw_offset_step})**")
+                    fig3, ax3 = plt.subplots(figsize=(fig_width, fig_height/2))
+                    
+                    for idx, (name, spec) in enumerate(filtered_spectra.items()):
+                        data = spec['data']
+                        x = data['x'].values
+                        y = data['y'].values
+                        color = spec['color']
+                        display_name = name.replace('.txt', '')
+                        
+                        offset = idx * raw_offset_step
+                        y_plot = y + offset
+                        
+                        ax3.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+                    
+                    ax3.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax3.set_ylabel(y_label, fontsize=11, fontweight='bold')
+                    ax3.set_title(f"Raw Spectra + Offset (step = {raw_offset_step})", fontsize=12, fontweight='bold')
+                    ax3.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
+                    ax3.tick_params(direction='in', length=5, width=1)
+                    ax3.grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig3)
+                    
+                    # Download button for raw offset spectra
+                    buf3 = BytesIO()
+                    fig3.savefig(buf3, format='png', dpi=300, bbox_inches='tight')
+                    buf3.seek(0)
+                    b64_3 = base64.b64encode(buf3.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64_3}" download="raw_offset_spectra.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
+                                📥 Download Raw Offset Spectra (PNG)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig3)
+                
+                # Tab 4: Normalized Spectra + Offset (with fill and gradient options)
+                with viz_tab4:
+                    st.markdown(f"**Normalized Spectra with Cumulative Offset (step = {norm_offset_step})**")
+                    if fill_area:
+                        if gradient_fill:
+                            st.markdown("*🎨 Gradient fill enabled - color fades from top to bottom*")
+                        else:
+                            st.markdown("*🎨 Semi-transparent fill enabled*")
+                    if subtract_min_norm:
+                        st.markdown("*📐 Minimum intensity subtracted (baseline at zero)*")
+                    
+                    fig4, ax4 = plt.subplots(figsize=(fig_width, fig_height/2))
+                    
+                    for idx, (name, spec) in enumerate(normalized_spectra_independent.items()):
+                        data = spec['data']
+                        x = data['x'].values
+                        y = data['y'].values
+                        color = spec['color']
+                        display_name = name.replace('.txt', '')
+                        
+                        offset = idx * norm_offset_step
+                        y_plot = y + offset
+                        
+                        if fill_area:
+                            if gradient_fill:
+                                # Apply gradient fill
+                                gradient_fill_between(ax4, x, y_plot, offset, color, alpha=0.4, n_layers=30)
+                            else:
+                                # Regular fill
+                                ax4.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+                        
+                        ax4.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+                    
+                    ax4.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax4.set_ylabel(f"Normalized Intensity ({norm_method})", fontsize=11, fontweight='bold')
+                    ax4.set_title(f"Normalized Spectra + Offset (step = {norm_offset_step})", fontsize=12, fontweight='bold')
+                    ax4.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
+                    ax4.tick_params(direction='in', length=5, width=1)
+                    ax4.grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig4)
+                    
+                    # Download button for normalized offset spectra
+                    buf4 = BytesIO()
+                    fig4.savefig(buf4, format='png', dpi=300, bbox_inches='tight')
+                    buf4.seek(0)
+                    b64_4 = base64.b64encode(buf4.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64_4}" download="normalized_offset_spectra.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
+                                📥 Download Normalized Offset Spectra (PNG)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig4)
+                
+                # Option to download all plots as ZIP
+                st.markdown("---")
+                st.markdown("### 📦 Download All Plots")
+                col_zip1, col_zip2, col_zip3 = st.columns([1, 2, 1])
+                with col_zip2:
+                    import zipfile
+                    zip_buffer = BytesIO()
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        # Save all figures to ZIP
+                        fig_list = []
+                        for fig_obj, filename in [(fig1, "raw_spectra.png"), (fig2, "normalized_spectra.png"), 
+                                                   (fig3, "raw_offset_spectra.png"), (fig4, "normalized_offset_spectra.png")]:
+                            buf_temp = BytesIO()
+                            fig_obj.savefig(buf_temp, format='png', dpi=300, bbox_inches='tight')
+                            buf_temp.seek(0)
+                            zip_file.writestr(filename, buf_temp.getvalue())
+                    
+                    zip_buffer.seek(0)
+                    st.download_button(
+                        label="📦 Download All Plots (ZIP Archive)",
+                        data=zip_buffer,
+                        file_name=f"all_spectra_plots_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+                
             else:
                 st.warning("No spectra selected for visualization")
             st.markdown('</div>', unsafe_allow_html=True)
