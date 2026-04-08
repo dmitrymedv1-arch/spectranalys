@@ -1587,8 +1587,14 @@ def main():
                 export_data = pd.DataFrame()
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
-                    export_data[f"{name.replace('.txt', '')}_x"] = data['x']
-                    export_data[f"{name.replace('.txt', '')}_y"] = data['y']
+                    temp_df = pd.DataFrame({
+                        f"{name.replace('.txt', '')}_x": data['x'].values,
+                        f"{name.replace('.txt', '')}_y": data['y'].values
+                    })
+                    if export_data.empty:
+                        export_data = temp_df
+                    else:
+                        export_data = pd.concat([export_data, temp_df], axis=1)
                 
                 csv = export_data.to_csv(index=False)
                 st.download_button(
@@ -1605,8 +1611,15 @@ def main():
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
                     y_norm = normalize_spectrum(data['x'].values, data['y'].values, norm_method, norm_range)
-                    export_norm[f"{name.replace('.txt', '')}_x"] = data['x']
-                    export_norm[f"{name.replace('.txt', '')}_y_norm"] = y_norm
+                    # Используем временный DataFrame для каждого спектра, чтобы избежать ошибки несовпадения длин
+                    temp_df = pd.DataFrame({
+                        f"{name.replace('.txt', '')}_x": data['x'].values,
+                        f"{name.replace('.txt', '')}_y_norm": y_norm
+                    })
+                    if export_norm.empty:
+                        export_norm = temp_df
+                    else:
+                        export_norm = pd.concat([export_norm, temp_df], axis=1)
                 
                 csv_norm = export_norm.to_csv(index=False)
                 st.download_button(
