@@ -352,6 +352,191 @@ def gradient_fill(ax, x, y, baseline, color, alpha=0.3):
     patch = patches.PathPatch(path, facecolor=color, alpha=alpha, edgecolor='none')
     ax.add_patch(patch)
 
+# Function to create individual plot (single visualization type)
+def create_individual_plot(spectra_dict, x_label, y_label, title,
+                           offset_step, fill_area, normalized, use_offset,
+                           norm_method, x_ranges=None, subtract_min=False,
+                           gradient_fill_enabled=False, figure_size=(10, 6)):
+    """Create individual scientific plot for a single visualization type"""
+    
+    # Prepare data with normalization if needed
+    if normalized:
+        plot_spectra = {}
+        for name, spec in spectra_dict.items():
+            data = spec['data']
+            y_norm = normalize_spectrum(
+                data['x'].values,
+                data['y'].values,
+                norm_method,
+                None,
+                subtract_min
+            )
+            plot_spectra[name] = {
+                'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
+                'color': spec['color']
+            }
+    else:
+        plot_spectra = spectra_dict
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figure_size)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    
+    # Store handles and labels for legend
+    handles = []
+    labels = []
+    
+    spectra_items = list(plot_spectra.items())
+    
+    if x_ranges is None or len(x_ranges) == 0:
+        # Simple plot without broken axis
+        for idx, (name, spec) in enumerate(spectra_items):
+            data = spec['data']
+            x = data['x'].values
+            y = data['y'].values
+            color = spec['color']
+            
+            display_name = name.replace('.txt', '')
+            
+            # Apply cumulative offset if requested
+            if use_offset:
+                offset = idx * offset_step
+            else:
+                offset = 0
+            
+            y_plot = y + offset
+            
+            if fill_area and normalized and use_offset:
+                # Check if gradient fill is enabled
+                if gradient_fill_enabled:
+                    gradient_fill(ax, x, y_plot, offset, color, alpha=0.3)
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+                else:
+                    ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            elif fill_area and normalized:
+                if gradient_fill_enabled:
+                    gradient_fill(ax, x, y_plot, 0, color, alpha=0.3)
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+                else:
+                    ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            else:
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
+            
+            handles.append(line_handle[0])
+            labels.append(display_name)
+        
+        ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
+        ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
+        
+    else:
+        # Broken axis plot with multiple x-ranges
+        for range_idx, (start, end) in enumerate(x_ranges):
+            for idx, (name, spec) in enumerate(spectra_items):
+                data = spec['data']
+                x_full = data['x'].values
+                y_full = data['y'].values
+                color = spec['color']
+                
+                display_name = name.replace('.txt', '')
+                
+                # Crop to current range
+                mask = (x_full >= start) & (x_full <= end)
+                if not np.any(mask):
+                    continue
+                
+                x = x_full[mask]
+                y = y_full[mask]
+                
+                # Apply cumulative offset if requested
+                if use_offset:
+                    offset = idx * offset_step
+                else:
+                    offset = 0
+                
+                y_plot = y + offset
+                
+                # Plot
+                if fill_area and normalized and use_offset:
+                    if gradient_fill_enabled:
+                        gradient_fill(ax, x, y_plot, offset, color, alpha=0.3)
+                        line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
+                    else:
+                        ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
+                        line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
+                elif fill_area and normalized:
+                    if gradient_fill_enabled:
+                        gradient_fill(ax, x, y_plot, 0, color, alpha=0.3)
+                        line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
+                    else:
+                        ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
+                        line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
+                else:
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
+                
+                # Add to handles only for first range
+                if range_idx == 0 and idx == 0:
+                    handles.append(line_handle[0])
+                    labels.append(display_name)
+                elif range_idx == 0:
+                    handles.append(line_handle[0])
+                    labels.append(display_name)
+            
+            # Add vertical line for range boundaries
+            ax.axvline(start, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+            ax.axvline(end, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+        
+        ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
+        ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
+    
+    # Add legend outside the plot to the right
+    if handles:
+        if use_offset:
+            reversed_handles = list(reversed(handles))
+            reversed_labels = list(reversed(labels))
+            legend = ax.legend(reversed_handles, reversed_labels, 
+                              loc='center left', 
+                              bbox_to_anchor=(1.02, 0.5),
+                              fontsize=8,
+                              frameon=True, 
+                              edgecolor='black', 
+                              prop={'weight': 'bold'})
+            for text, handle in zip(legend.get_texts(), reversed_handles):
+                text.set_color(handle.get_color())
+        else:
+            legend = ax.legend(handles, labels, 
+                              loc='center left', 
+                              bbox_to_anchor=(1.02, 0.5),
+                              fontsize=8,
+                              frameon=True, 
+                              edgecolor='black', 
+                              prop={'weight': 'bold'})
+            for text, handle in zip(legend.get_texts(), handles):
+                text.set_color(handle.get_color())
+    
+    ax.tick_params(direction='in', length=5, width=1)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
+    plt.subplots_adjust(right=0.85)
+    
+    return fig
+
+
+# Function to create individual plot with high DPI for download
+def create_individual_plot_high_dpi(spectra_dict, x_label, y_label, title,
+                                     offset_step, fill_area, normalized, use_offset,
+                                     norm_method, x_ranges=None, subtract_min=False,
+                                     gradient_fill_enabled=False, figure_size=(10, 6), dpi=600):
+    """Create individual plot with high DPI for download"""
+    fig = create_individual_plot(spectra_dict, x_label, y_label, title,
+                                 offset_step, fill_area, normalized, use_offset,
+                                 norm_method, x_ranges, subtract_min,
+                                 gradient_fill_enabled, figure_size)
+    return fig
+
+# Function to create combined plot with all four visualization types (vertical layout) with aspect ratio control
 # Function to create combined plot with all four visualization types (vertical layout) with aspect ratio control
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
@@ -534,7 +719,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
         ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95, hspace=0.4, right=0.85)  # right=0.85 reserves space for legends
+    plt.subplots_adjust(top=0.95, hspace=0.4, right=0.85)
     
     return fig
 
@@ -968,36 +1153,130 @@ def main():
         with tab1:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("Comprehensive Spectra Analysis")
-            st.markdown("*All visualization modes combined for comprehensive spectral comparison*")
+            st.markdown("*Each visualization mode is displayed independently for separate export*")
             
             if filtered_spectra:
-                fig = create_combined_plot(
-                    filtered_spectra, x_label, y_label,
-                    "SpectrAnalys - Multi-Mode Spectral Visualization",
-                    raw_offset_step, norm_offset_step, fill_area,
-                    norm_method, x_ranges, figure_aspect_ratio,
-                    subtract_min_normalized, gradient_fill_enabled
-                )
-                st.pyplot(fig)
-                plt.close()
+                # Define configurations for all four independent plots
+                plot_configs = [
+                    {
+                        "title": "Raw Spectra",
+                        "normalized": False,
+                        "use_offset": False,
+                        "offset_step": 0,
+                        "fill_area": False,
+                        "ylabel": y_label,
+                        "key": "raw"
+                    },
+                    {
+                        "title": f"Normalized Spectra ({norm_method})",
+                        "normalized": True,
+                        "use_offset": False,
+                        "offset_step": 0,
+                        "fill_area": False,
+                        "ylabel": f"Normalized Intensity ({norm_method})",
+                        "key": "norm"
+                    },
+                    {
+                        "title": f"Raw Spectra + Offset (step = {raw_offset_step})",
+                        "normalized": False,
+                        "use_offset": True,
+                        "offset_step": raw_offset_step,
+                        "fill_area": False,
+                        "ylabel": y_label,
+                        "key": "raw_offset"
+                    },
+                    {
+                        "title": f"Normalized Spectra + Offset (step = {norm_offset_step})",
+                        "normalized": True,
+                        "use_offset": True,
+                        "offset_step": norm_offset_step,
+                        "fill_area": fill_area,
+                        "ylabel": f"Normalized Intensity ({norm_method})",
+                        "key": "norm_offset"
+                    }
+                ]
                 
-                # Download button for combined plot
-                from io import BytesIO
-                buf = BytesIO()
-                fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-                buf.seek(0)
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                st.markdown(f"""
-                <div style="text-align: center; margin-top: 1rem;">
-                    <a href="data:image/png;base64,{b64}" download="spectra_combined_plot.png">
-                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                       color: white; border: none; border-radius: 8px; 
-                                       padding: 0.5rem 1rem; cursor: pointer;">
-                            📥 Download Combined Plot (PNG)
-                        </button>
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
+                # Display each plot in a separate row with its own download button
+                for config in plot_configs:
+                    st.markdown(f"#### {config['title']}")
+                    
+                    col_plot, col_btn = st.columns([4, 1])
+                    
+                    with col_plot:
+                        # Create plot for display (standard DPI for quick rendering)
+                        fig_display = create_individual_plot(
+                            filtered_spectra, x_label, config['ylabel'], config['title'],
+                            config['offset_step'], config['fill_area'], config['normalized'],
+                            config['use_offset'], norm_method, x_ranges,
+                            subtract_min_normalized, gradient_fill_enabled,
+                            figure_size=(figure_aspect_ratio[0], figure_aspect_ratio[1] // 2)
+                        )
+                        st.pyplot(fig_display)
+                        plt.close(fig_display)
+                    
+                    with col_btn:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        # Create high DPI version for download
+                        fig_high_dpi = create_individual_plot(
+                            filtered_spectra, x_label, config['ylabel'], config['title'],
+                            config['offset_step'], config['fill_area'], config['normalized'],
+                            config['use_offset'], norm_method, x_ranges,
+                            subtract_min_normalized, gradient_fill_enabled,
+                            figure_size=(figure_aspect_ratio[0], figure_aspect_ratio[1] // 2)
+                        )
+                        
+                        # Save to buffer with 600 DPI
+                        buf = BytesIO()
+                        fig_high_dpi.savefig(buf, format='png', dpi=600, bbox_inches='tight', facecolor='white')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        
+                        # Create safe filename
+                        safe_title = config['title'].replace(' ', '_').replace('(', '').replace(')', '').replace('=', '').replace('+', 'plus')
+                        filename = f"spectra_{safe_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                        
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 1rem;">
+                            <a href="data:image/png;base64,{b64}" download="{filename}">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.5rem 1rem; cursor: pointer; width: 100%;">
+                                    📥 Download PNG<br><span style="font-size: 0.7rem;">600 DPI</span>
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        plt.close(fig_high_dpi)
+                    
+                    st.markdown("---")
+                
+                # Optional: Combined plot download (kept for backward compatibility)
+                with st.expander("📥 Download Combined Plot (Legacy - 4-in-1 view)"):
+                    fig_combined = create_combined_plot(
+                        filtered_spectra, x_label, y_label,
+                        "SpectrAnalys - Multi-Mode Spectral Visualization",
+                        raw_offset_step, norm_offset_step, fill_area,
+                        norm_method, x_ranges, figure_aspect_ratio,
+                        subtract_min_normalized, gradient_fill_enabled
+                    )
+                    buf_combined = BytesIO()
+                    fig_combined.savefig(buf_combined, format='png', dpi=600, bbox_inches='tight', facecolor='white')
+                    buf_combined.seek(0)
+                    b64_combined = base64.b64encode(buf_combined.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center;">
+                        <a href="data:image/png;base64,{b64_combined}" download="spectra_combined_all_modes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.5rem 1rem; cursor: pointer;">
+                                📥 Download Combined 4-in-1 Plot (600 DPI)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig_combined)
+                
             else:
                 st.warning("No spectra selected for visualization")
             st.markdown('</div>', unsafe_allow_html=True)
