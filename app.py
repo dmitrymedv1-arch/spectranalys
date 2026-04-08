@@ -1316,7 +1316,7 @@ def main():
                 plt.close()
                 
                 # Run analysis button
-                if st.button("🚀 Запустить анализ", key="run_peak_analysis"):
+                if st.button("🚀 Analyze", key="run_peak_analysis"):
                     if left_boundary < right_boundary:
                         with st.spinner("Analyzing peaks..."):
                             peaks_df = analyze_peaks_manual_range(
