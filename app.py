@@ -10,7 +10,7 @@ from datetime import datetime
 import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
-
+ 
 # Set page config with custom theme
 st.set_page_config(
     page_title="SpectrAnalys",
