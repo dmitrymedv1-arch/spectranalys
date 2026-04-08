@@ -950,13 +950,13 @@ def main():
                     # NEW: Figure aspect ratio control
                     st.markdown("#### 📐 Figure Aspect Ratio")
                     aspect_ratio_option = st.selectbox(
-                        "Graph area size (width × height, excluding legend)",
+                        "Graph area size (height × width, excluding legend)",
                         ["3×3", "4×3", "5×3", "6×3", "7×3", "9×3"],
                         index=1,
-                        help="Controls the size of the actual plot area (axes with numbers and labels)"
+                        help="Controls the size of the actual plot area (axes with numbers and labels). First number is height, second is width."
                     )
                     
-                    # Convert aspect ratio to figsize
+                    # Convert aspect ratio to figsize (width, height) for matplotlib
                     aspect_map = {
                         "3×3": (8, 8),
                         "4×3": (8, 10.67),
