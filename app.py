@@ -376,18 +376,25 @@ def crop_to_ranges_multi(x, y, ranges):
 
 # Function to create gradient fill between y and baseline
 def gradient_fill_between(ax, x, y, baseline, color, alpha=0.3):
-    """Create gradient fill from line to baseline"""
+    """Create gradient fill from line to baseline using polygon collection"""
+    from matplotlib.collections import PolyCollection
+    import matplotlib.pyplot as plt
+    
+    verts = []
     for i in range(len(x) - 1):
-        # Create polygon for each segment
+        # Create vertices for polygon between x[i] and x[i+1]
         x_seg = [x[i], x[i+1], x[i+1], x[i]]
         y_seg = [y[i], y[i+1], baseline, baseline]
-        
-        # Calculate gradient alpha (higher near the line)
-        alpha_top = alpha
-        alpha_bottom = 0.0
-        
-        # Create polygon with gradient-like effect using multiple segments
-        ax.fill(x_seg, y_seg, color=color, alpha=alpha_top, linewidth=0)
+        verts.append(list(zip(x_seg, y_seg)))
+    
+    # Create polygon collection with gradient-like appearance using alpha mapping
+    poly = PolyCollection(verts, facecolor=color, alpha=alpha, linewidth=0)
+    ax.add_collection(poly)
+    
+    # Add additional translucent layers for depth
+    for layer_alpha in np.linspace(alpha*0.3, alpha*0.8, 5):
+        poly_light = PolyCollection(verts, facecolor=color, alpha=layer_alpha*0.3, linewidth=0)
+        ax.add_collection(poly_light)
 
 # Function to create combined plot with all four visualization types (vertical layout)
 def create_combined_plot(spectra_dict, x_label, y_label, title,
