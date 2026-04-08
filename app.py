@@ -1187,20 +1187,20 @@ def main():
                         
                         peak_prominence_factor = st.slider(
                             "Peak prominence factor (% of max)",
-                            min_value=1,
-                            max_value=20,
-                            value=st.session_state.peak_prominence_factor,
-                            step=1,
+                            min_value=1.0,
+                            max_value=20.0,
+                            value=float(st.session_state.peak_prominence_factor),
+                            step=1.0,
                             key="peak_prominence_slider"
                         ) / 100.0
                         st.session_state.peak_prominence_factor = peak_prominence_factor * 100
                         
                         peak_height_factor = st.slider(
                             "Peak height threshold (% of max)",
-                            min_value=1,
-                            max_value=30,
-                            value=st.session_state.peak_height_factor,
-                            step=1,
+                            min_value=1.0,
+                            max_value=30.0,
+                            value=float(st.session_state.peak_height_factor),
+                            step=1.0,
                             key="peak_height_slider"
                         ) / 100.0
                         st.session_state.peak_height_factor = peak_height_factor * 100
