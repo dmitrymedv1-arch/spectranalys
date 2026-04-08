@@ -691,41 +691,45 @@ def calculate_fwhm(x, y, peak_idx):
     peak_y = y[peak_idx]
     half_max = peak_y / 2
     
+    # Initialize variables
+    x_left = x[0]
+    x_right = x[-1]
+    
     # Find left crossing - search backwards from peak
     left_idx = peak_idx
     while left_idx > 0 and y[left_idx] > half_max:
         left_idx -= 1
     
-    # If we reached the beginning, try to find more carefully
-    if left_idx == 0 and y[0] > half_max:
-        left_idx = 0
     # If we found a point below half_max, interpolate
-    elif left_idx > 0:
+    if left_idx > 0 and y[left_idx] < half_max:
         # Interpolate for more accurate left boundary
         x_left = np.interp(half_max, [y[left_idx], y[left_idx+1]], [x[left_idx], x[left_idx+1]])
-    else:
-        # Use the first point if no crossing found
-        x_left = x[0]
+    elif left_idx == 0:
+        # Check if we need to interpolate from start
+        if y[0] < half_max:
+            x_left = np.interp(half_max, [y[0], y[1]], [x[0], x[1]])
+        else:
+            x_left = x[0]
     
     # Find right crossing - search forward from peak
     right_idx = peak_idx
     while right_idx < len(y) - 1 and y[right_idx] > half_max:
         right_idx += 1
     
-    # If we reached the end, try to find more carefully
-    if right_idx == len(y) - 1 and y[-1] > half_max:
-        right_idx = len(y) - 1
     # If we found a point below half_max, interpolate
-    elif right_idx < len(y) - 1:
+    if right_idx < len(y) - 1 and y[right_idx] < half_max:
         # Interpolate for more accurate right boundary
         x_right = np.interp(half_max, [y[right_idx], y[right_idx-1]], [x[right_idx], x[right_idx-1]])
-    else:
-        # Use the last point if no crossing found
-        x_right = x[-1]
+    elif right_idx == len(y) - 1:
+        # Check if we need to interpolate from end
+        if y[-1] < half_max:
+            x_right = np.interp(half_max, [y[-2], y[-1]], [x[-2], x[-1]])
+        else:
+            x_right = x[-1]
     
     # Return FWHM, handle edge cases
     fwhm = x_right - x_left
-    return max(fwhm, 0)  # Ensure non-negative
+    return max(fwhm, 0)
 
 # Function for peak analysis with manual range selection
 def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
