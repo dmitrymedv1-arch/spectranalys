@@ -951,19 +951,19 @@ def main():
                     st.markdown("#### 📐 Figure Aspect Ratio")
                     aspect_ratio_option = st.selectbox(
                         "Graph area size (width × height, excluding legend)",
-                        ["3×3", "3×4", "3×5", "3×6", "3×7", "3×9"],
+                        ["3×3", "4×3", "5×3", "6×3", "7×3", "9×3"],
                         index=1,
                         help="Controls the size of the actual plot area (axes with numbers and labels)"
                     )
                     
                     # Convert aspect ratio to figsize
                     aspect_map = {
-                        "3×3": (8, 12),
-                        "3×4": (8, 16),
-                        "3×5": (8, 20),
-                        "3×6": (8, 24),
-                        "3×7": (8, 28),
-                        "3×9": (8, 36)
+                        "3×3": (8, 8),
+                        "4×3": (8, 10.67),
+                        "5×3": (8, 13.33),
+                        "6×3": (8, 16),
+                        "7×3": (8, 18.67),
+                        "9×3": (8, 24)
                     }
                     figure_aspect_ratio = aspect_map[aspect_ratio_option]
                     
