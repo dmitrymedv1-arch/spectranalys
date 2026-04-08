@@ -10,7 +10,7 @@ from datetime import datetime
 import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
- 
+
 # Set page config with custom theme
 st.set_page_config(
     page_title="SpectrAnalys",
@@ -246,70 +246,28 @@ def load_spectrum(uploaded_file):
 def normalize_spectrum(x, y, norm_method, norm_range=None, subtract_min=False):
     """Normalize spectrum using different methods"""
     if norm_method == "Maximum intensity":
-        normalized = y / y.max() if y.max() != 0 else y
+        y_norm = y / y.max() if y.max() != 0 else y
     elif norm_method == "Area":
         area = simpson(y, x)
-        if area != 0:
-            normalized = y / area
-        else:
-            normalized = y
+        y_norm = y / area if area != 0 else y
     elif norm_method == "Peak intensity (range)":
         if norm_range is not None:
             mask = (x >= norm_range[0]) & (x <= norm_range[1])
             if np.any(mask):
                 max_in_range = y[mask].max()
-                if max_in_range != 0:
-                    normalized = y / max_in_range
-                else:
-                    normalized = y / y.max() if y.max() != 0 else y
+                y_norm = y / max_in_range if max_in_range != 0 else y
             else:
-                normalized = y / y.max() if y.max() != 0 else y
+                y_norm = y / y.max() if y.max() != 0 else y
         else:
-            normalized = y / y.max() if y.max() != 0 else y
+            y_norm = y / y.max() if y.max() != 0 else y
     else:
-        normalized = y
+        y_norm = y
     
     # Apply subtract minimum if requested
-    if subtract_min and len(normalized) > 0:
-        normalized = normalized - normalized.min()
+    if subtract_min:
+        y_norm = y_norm - y_norm.min()
     
-    return normalized
-
-# Function to calculate FWHM for a peak
-def calculate_fwhm(x, y, peak_idx):
-    """Calculate Full Width at Half Maximum for a peak"""
-    peak_height = y[peak_idx]
-    half_height = peak_height / 2
-    
-    # Find left crossing
-    left_idx = peak_idx
-    for i in range(peak_idx, -1, -1):
-        if y[i] <= half_height:
-            left_idx = i
-            break
-    
-    # Find right crossing
-    right_idx = peak_idx
-    for i in range(peak_idx, len(y)):
-        if y[i] <= half_height:
-            right_idx = i
-            break
-    
-    if left_idx == right_idx:
-        return 0.0
-    
-    # Interpolate for more accurate FWHM
-    if left_idx > 0 and left_idx < len(x) - 1:
-        x_left = x[left_idx-1] + (half_height - y[left_idx-1]) * (x[left_idx] - x[left_idx-1]) / (y[left_idx] - y[left_idx-1])
-    else:
-        x_left = x[left_idx]
-    
-    if right_idx > 0 and right_idx < len(x) - 1:
-        x_right = x[right_idx] + (half_height - y[right_idx]) * (x[right_idx+1] - x[right_idx]) / (y[right_idx+1] - y[right_idx])
-    else:
-        x_right = x[right_idx]
-    
-    return x_right - x_left
+    return y_norm
 
 # Function to align x ranges
 def align_x_ranges(spectra_dict):
@@ -375,35 +333,33 @@ def crop_to_ranges_multi(x, y, ranges):
     return segments
 
 # Function to create gradient fill between y and baseline
-def gradient_fill_between(ax, x, y, baseline, color, alpha=0.3):
-    """Create gradient fill from line to baseline using polygon collection"""
-    from matplotlib.collections import PolyCollection
-    import matplotlib.pyplot as plt
+def gradient_fill(ax, x, y, baseline, color, alpha=0.3):
+    """Create gradient fill from baseline to y curve"""
+    from matplotlib.colors import LinearSegmentedColormap
+    import matplotlib.patches as patches
+    from matplotlib.path import Path
     
-    verts = []
-    for i in range(len(x) - 1):
-        # Create vertices for polygon between x[i] and x[i+1]
-        x_seg = [x[i], x[i+1], x[i+1], x[i]]
-        y_seg = [y[i], y[i+1], baseline, baseline]
-        verts.append(list(zip(x_seg, y_seg)))
+    # Create a colormap that fades to transparent at the bottom
+    cmap = LinearSegmentedColormap.from_list('gradient', [color, (1, 1, 1, 0)], N=100)
     
-    # Create polygon collection with gradient-like appearance using alpha mapping
-    poly = PolyCollection(verts, facecolor=color, alpha=alpha, linewidth=0)
-    ax.add_collection(poly)
+    # Create polygon for fill
+    verts = np.vstack([np.stack([x, y], axis=1),
+                       np.stack([x[::-1], np.full_like(x[::-1], baseline)], axis=1)])
+    verts = np.vstack([verts, verts[0]])
     
-    # Add additional translucent layers for depth
-    for layer_alpha in np.linspace(alpha*0.3, alpha*0.8, 5):
-        poly_light = PolyCollection(verts, facecolor=color, alpha=layer_alpha*0.3, linewidth=0)
-        ax.add_collection(poly_light)
+    # Create path and patch
+    path = Path(verts)
+    patch = patches.PathPatch(path, facecolor=color, alpha=alpha, edgecolor='none')
+    ax.add_patch(patch)
 
-# Function to create combined plot with all four visualization types (vertical layout)
+# Function to create combined plot with all four visualization types (vertical layout) with aspect ratio control
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
-                         norm_method, x_ranges=None, subtract_min_for_norm=False, 
-                         gradient_fill=False, fig_width=12, fig_height=18):
+                         norm_method, x_ranges=None, figure_aspect_ratio=(12, 18),
+                         subtract_min_normalized=False, gradient_fill_enabled=False):
     """Create scientific plot with all four visualization types in vertical subplots"""
     
-    # Prepare normalized spectra
+    # Prepare normalized spectra with subtract_min option
     normalized_spectra = {}
     for name, spec in spectra_dict.items():
         data = spec['data']
@@ -412,15 +368,15 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             data['y'].values,
             norm_method,
             None,
-            subtract_min_for_norm  # Apply subtract min if requested
+            subtract_min_normalized
         )
         normalized_spectra[name] = {
             'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
             'color': spec['color']
         }
     
-    # Create figure with 4 subplots vertically (4 rows, 1 column)
-    fig, axes = plt.subplots(4, 1, figsize=(fig_width, fig_height))
+    # Create figure with 4 subplots vertically (4 rows, 1 column) using custom aspect ratio
+    fig, axes = plt.subplots(4, 1, figsize=figure_aspect_ratio)
     fig.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
     
     # Define the four visualization types
@@ -457,13 +413,13 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 y_plot = y + offset
                 
                 if fill and normalized:
-                    # Check if gradient fill is requested for normalized spectra with offset
-                    if gradient_fill and use_offset and normalized:
+                    # Check if gradient fill is enabled for the normalized+offset plot
+                    if gradient_fill_enabled and subplot_title.startswith("Normalized Spectra + Offset"):
                         # Apply gradient fill
-                        gradient_fill_between(ax, x, y_plot, offset, color, alpha=0.3)
+                        gradient_fill(ax, x, y_plot, offset, color, alpha=0.3)
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
                     else:
-                        # Regular fill
+                        # Regular semi-transparent fill
                         ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
                 else:
@@ -507,16 +463,16 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                     
                     # Plot
                     if fill and normalized and use_offset:
-                        # Check if gradient fill is requested
-                        if gradient_fill:
-                            gradient_fill_between(ax, x, y_plot, offset, color, alpha=0.3)
+                        # Check if gradient fill is enabled for the normalized+offset plot
+                        if gradient_fill_enabled and subplot_title.startswith("Normalized Spectra + Offset"):
+                            gradient_fill(ax, x, y_plot, offset, color, alpha=0.3)
                             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
                         else:
                             ax.fill_between(x, offset, y_plot, alpha=0.3, color=color)
                             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
                     elif fill and normalized:
-                        if gradient_fill:
-                            gradient_fill_between(ax, x, y_plot, 0, color, alpha=0.3)
+                        if gradient_fill_enabled and subplot_title.startswith("Normalized Spectra + Offset"):
+                            gradient_fill(ax, x, y_plot, 0, color, alpha=0.3)
                             line_handle = ax.plot(x, y_plot, color=color, linewidth=1.5, label=display_name if range_idx == 0 else "")
                         else:
                             ax.fill_between(x, 0, y_plot, alpha=0.3, color=color)
@@ -582,121 +538,101 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
     
     return fig
 
-# Function for peak analysis with user-defined region
-def analyze_peaks_in_region(spectra_dict, x_min, x_max, x_ranges=None, peak_width=20):
-    """Analyze peaks in user-defined region"""
+# Function to calculate FWHM for a peak
+def calculate_fwhm(x, y, peak_idx, peak_prominence=0.5):
+    """Calculate Full Width at Half Maximum for a peak"""
+    peak_y = y[peak_idx]
+    half_max = peak_y * peak_prominence
+    
+    # Find left half-max point
+    left_idx = peak_idx
+    for i in range(peak_idx - 1, -1, -1):
+        if y[i] <= half_max:
+            left_idx = i
+            break
+    
+    # Find right half-max point
+    right_idx = peak_idx
+    for i in range(peak_idx + 1, len(y)):
+        if y[i] <= half_max:
+            right_idx = i
+            break
+    
+    # Interpolate for more accurate FWHM
+    if left_idx > 0 and right_idx < len(x) - 1:
+        # Linear interpolation for left side
+        x_left = x[left_idx] + (x[left_idx + 1] - x[left_idx]) * (half_max - y[left_idx]) / (y[left_idx + 1] - y[left_idx])
+        # Linear interpolation for right side
+        x_right = x[right_idx] + (x[right_idx + 1] - x[right_idx]) * (half_max - y[right_idx]) / (y[right_idx + 1] - y[right_idx])
+        fwhm = x_right - x_left
+    else:
+        fwhm = (x[right_idx] - x[left_idx]) if right_idx > left_idx else 0
+    
+    return fwhm
+
+# Function for peak analysis with region selection
+def analyze_peaks_in_region(spectra_dict, x_min, x_max, peak_width=20, peak_prominence_factor=0.05, peak_height_factor=0.1):
+    """Analyze peaks in a specific x-axis region"""
     results = []
     
     for name, spec in spectra_dict.items():
         data = spec['data']
-        x_full = data['x'].values
-        y_full = data['y'].values
+        x = data['x'].values
+        y = data['y'].values
         
-        # Apply user-defined region first
-        region_mask = (x_full >= x_min) & (x_full <= x_max)
-        x = x_full[region_mask]
-        y = y_full[region_mask]
-        
-        # Then apply x_ranges if specified (intersection)
-        if x_ranges is not None and len(x_ranges) > 0:
-            x_cropped = []
-            y_cropped = []
-            for start, end in x_ranges:
-                range_mask = (x >= start) & (x <= end)
-                if np.any(range_mask):
-                    x_cropped.extend(x[range_mask])
-                    y_cropped.extend(y[range_mask])
-            x = np.array(x_cropped)
-            y = np.array(y_cropped)
-        
-        if len(x) == 0:
+        # Crop to selected region
+        mask = (x >= x_min) & (x <= x_max)
+        if not np.any(mask):
             continue
         
-        # Find peaks with adjusted parameters for better detection
-        peaks, properties = find_peaks(y, 
-                                      height=np.max(y)*0.1, 
-                                      prominence=np.max(y)*0.05,
-                                      distance=5)
+        x_cropped = x[mask]
+        y_cropped = y[mask]
+        
+        if len(x_cropped) == 0:
+            continue
+        
+        # Find peaks
+        peaks, properties = find_peaks(y_cropped, 
+                                       height=np.max(y_cropped) * peak_height_factor, 
+                                       prominence=np.max(y_cropped) * peak_prominence_factor)
         
         for peak_idx in peaks:
-            peak_x = x[peak_idx]
-            peak_y = y[peak_idx]
+            peak_x = x_cropped[peak_idx]
+            peak_y = y_cropped[peak_idx]
             
             # Calculate area around peak
             left_idx = max(0, peak_idx - peak_width)
-            right_idx = min(len(x), peak_idx + peak_width)
-            area = simpson(y[left_idx:right_idx+1], x[left_idx:right_idx+1])
+            right_idx = min(len(x_cropped), peak_idx + peak_width)
+            area = simpson(y_cropped[left_idx:right_idx+1], x_cropped[left_idx:right_idx+1])
             
             # Calculate FWHM
-            fwhm = calculate_fwhm(x, y, peak_idx)
+            fwhm = calculate_fwhm(x_cropped, y_cropped, peak_idx)
             
             results.append({
                 'Spectrum': name.replace('.txt', ''),
                 'Peak position (cm⁻¹)': peak_x,
                 'Intensity (a.u.)': peak_y,
-                'Area (a.u.)': area,
+                'Area': area,
                 'FWHM (cm⁻¹)': fwhm
             })
     
     return pd.DataFrame(results) if results else pd.DataFrame()
 
-# Function for advanced peak analysis with FWHM and fitting
-def analyze_peaks_advanced(spectra_dict, x_min, x_max, x_ranges=None, peak_width=20, fit_peaks=False):
-    """Advanced peak analysis with FWHM calculation"""
-    results = []
+# Function to get global x range for sliders
+def get_global_x_range(spectra_dict):
+    """Get global min and max x values across all spectra"""
+    if not spectra_dict:
+        return 0, 100
     
-    for name, spec in spectra_dict.items():
-        data = spec['data']
-        x_full = data['x'].values
-        y_full = data['y'].values
-        
-        # Apply user-defined region first
-        region_mask = (x_full >= x_min) & (x_full <= x_max)
-        x = x_full[region_mask]
-        y = y_full[region_mask]
-        
-        # Then apply x_ranges if specified (intersection)
-        if x_ranges is not None and len(x_ranges) > 0:
-            x_cropped = []
-            y_cropped = []
-            for start, end in x_ranges:
-                range_mask = (x >= start) & (x <= end)
-                if np.any(range_mask):
-                    x_cropped.extend(x[range_mask])
-                    y_cropped.extend(y[range_mask])
-            x = np.array(x_cropped)
-            y = np.array(y_cropped)
-        
-        if len(x) == 0:
-            continue
-        
-        # Find peaks
-        peaks, properties = find_peaks(y, 
-                                      height=np.max(y)*0.1, 
-                                      prominence=np.max(y)*0.05,
-                                      distance=5)
-        
-        for peak_idx in peaks:
-            peak_x = x[peak_idx]
-            peak_y = y[peak_idx]
-            
-            # Calculate area around peak
-            left_idx = max(0, peak_idx - peak_width)
-            right_idx = min(len(x), peak_idx + peak_width)
-            area = simpson(y[left_idx:right_idx+1], x[left_idx:right_idx+1])
-            
-            # Calculate FWHM
-            fwhm = calculate_fwhm(x, y, peak_idx)
-            
-            results.append({
-                'Spectrum': name.replace('.txt', ''),
-                'Peak position (cm⁻¹)': peak_x,
-                'Intensity (a.u.)': peak_y,
-                'Area (a.u.)': area,
-                'FWHM (cm⁻¹)': fwhm
-            })
+    min_x = float('inf')
+    max_x = float('-inf')
     
-    return pd.DataFrame(results) if results else pd.DataFrame()
+    for spec in spectra_dict.values():
+        x = spec['data']['x'].values
+        min_x = min(min_x, x.min())
+        max_x = max(max_x, x.max())
+    
+    return min_x, max_x
 
 # Main app
 def main():
@@ -826,6 +762,26 @@ def main():
                     x_label = st.text_input("X-axis label", value="Raman shift (cm⁻¹)")
                     y_label = st.text_input("Y-axis label", value="Intensity (a.u.)")
                     
+                    # NEW: Figure aspect ratio control
+                    st.markdown("#### 📐 Figure Aspect Ratio")
+                    aspect_ratio_option = st.selectbox(
+                        "Graph area size (width × height, excluding legend)",
+                        ["3×3", "3×4", "3×5", "3×6", "3×7", "3×9"],
+                        index=1,
+                        help="Controls the size of the actual plot area (axes with numbers and labels)"
+                    )
+                    
+                    # Convert aspect ratio to figsize
+                    aspect_map = {
+                        "3×3": (8, 12),
+                        "3×4": (8, 16),
+                        "3×5": (8, 20),
+                        "3×6": (8, 24),
+                        "3×7": (8, 28),
+                        "3×9": (8, 36)
+                    }
+                    figure_aspect_ratio = aspect_map[aspect_ratio_option]
+                    
                     # Normalization options
                     st.markdown("#### 📐 Normalization")
                     norm_method = st.selectbox(
@@ -847,24 +803,13 @@ def main():
                             except:
                                 st.warning("Invalid range format")
                     
-                    # NEW: Figure size adjustment widget
-                    st.markdown("#### 📐 Plot Size Adjustment")
-                    fig_size_option = st.selectbox(
-                        "Graph area size (width × height)",
-                        options=["3×3", "3×4", "3×5", "3×6", "3×7", "3×9"],
-                        index=2,  # Default to 3×5
-                        help="Controls the size of the graph area (excluding legend)"
+                    # NEW: Subtract minimum for normalized spectra
+                    st.markdown("#### 🔧 Normalized Spectra Adjustments")
+                    subtract_min_normalized = st.checkbox(
+                        "Subtract minimum intensity from normalized spectra",
+                        value=False,
+                        help="Subtracts the minimum intensity value from each normalized spectrum, shifting baseline to zero"
                     )
-                    
-                    # Parse figure size
-                    fig_width_map = {
-                        "3×3": 9, "3×4": 12, "3×5": 12, "3×6": 12, "3×7": 14, "3×9": 16
-                    }
-                    fig_height_map = {
-                        "3×3": 9, "3×4": 12, "3×5": 15, "3×6": 18, "3×7": 21, "3×9": 27
-                    }
-                    fig_width = fig_width_map[fig_size_option]
-                    fig_height = fig_height_map[fig_size_option]
                     
                     # Offset options
                     st.markdown("#### 📈 Offset Settings")
@@ -888,28 +833,24 @@ def main():
                             key="norm_offset_step"
                         )
                     
-                    # Fill area option
+                    # Fill area option with gradient choice
+                    st.markdown("#### 🎨 Fill Area Settings")
                     fill_area = st.checkbox("Fill area under normalized spectra", value=False)
                     
-                    # NEW: Subtract minimum for normalized spectra
-                    subtract_min_norm = st.checkbox(
-                        "Subtract minimum intensity from normalized spectra", 
-                        value=False,
-                        help="Makes fill area start from zero baseline by subtracting the minimum intensity value"
-                    )
-                    
-                    # NEW: Gradient fill option (only appears when fill_area is True)
-                    gradient_fill = False
+                    # NEW: Gradient fill option (only appears when fill_area is enabled)
+                    gradient_fill_enabled = False
                     if fill_area:
-                        gradient_fill = st.checkbox(
-                            "Use gradient fill (fades to transparent at bottom)", 
-                            value=False,
-                            help="Creates a gradient effect where fill is more transparent near the baseline"
+                        fill_type = st.radio(
+                            "Fill type for normalized spectra+offset",
+                            ["Semi-transparent fill", "Gradient fill (fades to transparent)"],
+                            index=0,
+                            help="Gradient fill creates a smooth fade from opaque at the top to transparent at the bottom"
                         )
+                        gradient_fill_enabled = (fill_type == "Gradient fill (fades to transparent)")
                     
-                    # Peak analysis options
+                    # Peak analysis options (moved to sidebar but with manual region selection)
                     st.markdown("---")
-                    st.markdown("### 🔍 Peak Analysis")
+                    st.markdown("### 🔍 Peak Analysis Settings")
                     analyze_peaks_flag = st.checkbox("Enable advanced peak analysis", value=False)
                     
                     if analyze_peaks_flag:
@@ -920,6 +861,20 @@ def main():
                             value=20,
                             step=5
                         )
+                        peak_prominence_factor = st.slider(
+                            "Peak prominence factor (% of max)",
+                            min_value=1,
+                            max_value=20,
+                            value=5,
+                            step=1
+                        ) / 100.0
+                        peak_height_factor = st.slider(
+                            "Peak height threshold (% of max)",
+                            min_value=1,
+                            max_value=30,
+                            value=10,
+                            step=1
+                        ) / 100.0
                     
                     # Parameter correlation
                     st.markdown("---")
@@ -1000,6 +955,9 @@ def main():
         # Filter spectra based on selection
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
         
+        # Get global x range for peak analysis region sliders
+        global_x_min, global_x_max = get_global_x_range(filtered_spectra)
+        
         # Create tabs for different analysis views
         tab1, tab2, tab3 = st.tabs([
             "📊 Combined Spectra Visualization",
@@ -1010,249 +968,36 @@ def main():
         with tab1:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("Comprehensive Spectra Analysis")
-            st.markdown("*Four independent visualization modes - each can be viewed in fullscreen*")
+            st.markdown("*All visualization modes combined for comprehensive spectral comparison*")
             
             if filtered_spectra:
-                # Create 4 separate tabs for each visualization type
-                viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
-                    "📊 Raw Spectra",
-                    "📈 Normalized Spectra", 
-                    "📉 Raw Spectra + Offset",
-                    "🎨 Normalized Spectra + Offset"
-                ])
+                fig = create_combined_plot(
+                    filtered_spectra, x_label, y_label,
+                    "SpectrAnalys - Multi-Mode Spectral Visualization",
+                    raw_offset_step, norm_offset_step, fill_area,
+                    norm_method, x_ranges, figure_aspect_ratio,
+                    subtract_min_normalized, gradient_fill_enabled
+                )
+                st.pyplot(fig)
+                plt.close()
                 
-                # Prepare normalized spectra for independent use
-                normalized_spectra_independent = {}
-                for name, spec in filtered_spectra.items():
-                    data = spec['data']
-                    y_norm = normalize_spectrum(
-                        data['x'].values,
-                        data['y'].values,
-                        norm_method,
-                        None,
-                        subtract_min_norm
-                    )
-                    normalized_spectra_independent[name] = {
-                        'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
-                        'color': spec['color']
-                    }
-                
-                # Tab 1: Raw Spectra
-                with viz_tab1:
-                    st.markdown("**Raw Spectra - No normalization, no offset**")
-                    fig1, ax1 = plt.subplots(figsize=(fig_width, fig_height/2))
-                    
-                    for idx, (name, spec) in enumerate(filtered_spectra.items()):
-                        data = spec['data']
-                        x = data['x'].values
-                        y = data['y'].values
-                        color = spec['color']
-                        display_name = name.replace('.txt', '')
-                        
-                        ax1.plot(x, y, color=color, linewidth=1.5, label=display_name)
-                    
-                    ax1.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                    ax1.set_ylabel(y_label, fontsize=11, fontweight='bold')
-                    ax1.set_title("Raw Spectra", fontsize=12, fontweight='bold')
-                    ax1.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
-                    ax1.tick_params(direction='in', length=5, width=1)
-                    ax1.grid(True, alpha=0.3, linestyle='--')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig1)
-                    
-                    # Download button for raw spectra
-                    buf1 = BytesIO()
-                    fig1.savefig(buf1, format='png', dpi=300, bbox_inches='tight')
-                    buf1.seek(0)
-                    b64_1 = base64.b64encode(buf1.getvalue()).decode()
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-                        <a href="data:image/png;base64,{b64_1}" download="raw_spectra.png">
-                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                           color: white; border: none; border-radius: 8px; 
-                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
-                                📥 Download Raw Spectra (PNG)
-                            </button>
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    plt.close(fig1)
-                
-                # Tab 2: Normalized Spectra
-                with viz_tab2:
-                    st.markdown(f"**Normalized Spectra - Method: {norm_method}**")
-                    fig2, ax2 = plt.subplots(figsize=(fig_width, fig_height/2))
-                    
-                    for idx, (name, spec) in enumerate(normalized_spectra_independent.items()):
-                        data = spec['data']
-                        x = data['x'].values
-                        y = data['y'].values
-                        color = spec['color']
-                        display_name = name.replace('.txt', '')
-                        
-                        ax2.plot(x, y, color=color, linewidth=1.5, label=display_name)
-                    
-                    ax2.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                    ax2.set_ylabel(f"Normalized Intensity ({norm_method})", fontsize=11, fontweight='bold')
-                    ax2.set_title(f"Normalized Spectra ({norm_method})", fontsize=12, fontweight='bold')
-                    ax2.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
-                    ax2.tick_params(direction='in', length=5, width=1)
-                    ax2.grid(True, alpha=0.3, linestyle='--')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig2)
-                    
-                    # Download button for normalized spectra
-                    buf2 = BytesIO()
-                    fig2.savefig(buf2, format='png', dpi=300, bbox_inches='tight')
-                    buf2.seek(0)
-                    b64_2 = base64.b64encode(buf2.getvalue()).decode()
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-                        <a href="data:image/png;base64,{b64_2}" download="normalized_spectra.png">
-                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                           color: white; border: none; border-radius: 8px; 
-                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
-                                📥 Download Normalized Spectra (PNG)
-                            </button>
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    plt.close(fig2)
-                
-                # Tab 3: Raw Spectra + Offset
-                with viz_tab3:
-                    st.markdown(f"**Raw Spectra with Cumulative Offset (step = {raw_offset_step})**")
-                    fig3, ax3 = plt.subplots(figsize=(fig_width, fig_height/2))
-                    
-                    for idx, (name, spec) in enumerate(filtered_spectra.items()):
-                        data = spec['data']
-                        x = data['x'].values
-                        y = data['y'].values
-                        color = spec['color']
-                        display_name = name.replace('.txt', '')
-                        
-                        offset = idx * raw_offset_step
-                        y_plot = y + offset
-                        
-                        ax3.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-                    
-                    ax3.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                    ax3.set_ylabel(y_label, fontsize=11, fontweight='bold')
-                    ax3.set_title(f"Raw Spectra + Offset (step = {raw_offset_step})", fontsize=12, fontweight='bold')
-                    ax3.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
-                    ax3.tick_params(direction='in', length=5, width=1)
-                    ax3.grid(True, alpha=0.3, linestyle='--')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig3)
-                    
-                    # Download button for raw offset spectra
-                    buf3 = BytesIO()
-                    fig3.savefig(buf3, format='png', dpi=300, bbox_inches='tight')
-                    buf3.seek(0)
-                    b64_3 = base64.b64encode(buf3.getvalue()).decode()
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-                        <a href="data:image/png;base64,{b64_3}" download="raw_offset_spectra.png">
-                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                           color: white; border: none; border-radius: 8px; 
-                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
-                                📥 Download Raw Offset Spectra (PNG)
-                            </button>
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    plt.close(fig3)
-                
-                # Tab 4: Normalized Spectra + Offset (with fill and gradient options)
-                with viz_tab4:
-                    st.markdown(f"**Normalized Spectra with Cumulative Offset (step = {norm_offset_step})**")
-                    if fill_area:
-                        if gradient_fill:
-                            st.markdown("*🎨 Gradient fill enabled - color fades from top to bottom*")
-                        else:
-                            st.markdown("*🎨 Semi-transparent fill enabled*")
-                    if subtract_min_norm:
-                        st.markdown("*📐 Minimum intensity subtracted (baseline at zero)*")
-                    
-                    fig4, ax4 = plt.subplots(figsize=(fig_width, fig_height/2))
-                    
-                    for idx, (name, spec) in enumerate(normalized_spectra_independent.items()):
-                        data = spec['data']
-                        x = data['x'].values
-                        y = data['y'].values
-                        color = spec['color']
-                        display_name = name.replace('.txt', '')
-                        
-                        offset = idx * norm_offset_step
-                        y_plot = y + offset
-                        
-                        if fill_area:
-                            if gradient_fill:
-                                # Apply gradient fill
-                                gradient_fill_between(ax4, x, y_plot, offset, color, alpha=0.4, n_layers=30)
-                            else:
-                                # Regular fill
-                                ax4.fill_between(x, offset, y_plot, alpha=0.3, color=color)
-                        
-                        ax4.plot(x, y_plot, color=color, linewidth=1.5, label=display_name)
-                    
-                    ax4.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                    ax4.set_ylabel(f"Normalized Intensity ({norm_method})", fontsize=11, fontweight='bold')
-                    ax4.set_title(f"Normalized Spectra + Offset (step = {norm_offset_step})", fontsize=12, fontweight='bold')
-                    ax4.legend(loc='best', fontsize=10, frameon=True, edgecolor='black')
-                    ax4.tick_params(direction='in', length=5, width=1)
-                    ax4.grid(True, alpha=0.3, linestyle='--')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig4)
-                    
-                    # Download button for normalized offset spectra
-                    buf4 = BytesIO()
-                    fig4.savefig(buf4, format='png', dpi=300, bbox_inches='tight')
-                    buf4.seek(0)
-                    b64_4 = base64.b64encode(buf4.getvalue()).decode()
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-                        <a href="data:image/png;base64,{b64_4}" download="normalized_offset_spectra.png">
-                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                           color: white; border: none; border-radius: 8px; 
-                                           padding: 0.3rem 0.8rem; font-size: 0.8rem; cursor: pointer;">
-                                📥 Download Normalized Offset Spectra (PNG)
-                            </button>
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    plt.close(fig4)
-                
-                # Option to download all plots as ZIP
-                st.markdown("---")
-                st.markdown("### 📦 Download All Plots")
-                col_zip1, col_zip2, col_zip3 = st.columns([1, 2, 1])
-                with col_zip2:
-                    import zipfile
-                    zip_buffer = BytesIO()
-                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                        # Save all figures to ZIP
-                        fig_list = []
-                        for fig_obj, filename in [(fig1, "raw_spectra.png"), (fig2, "normalized_spectra.png"), 
-                                                   (fig3, "raw_offset_spectra.png"), (fig4, "normalized_offset_spectra.png")]:
-                            buf_temp = BytesIO()
-                            fig_obj.savefig(buf_temp, format='png', dpi=300, bbox_inches='tight')
-                            buf_temp.seek(0)
-                            zip_file.writestr(filename, buf_temp.getvalue())
-                    
-                    zip_buffer.seek(0)
-                    st.download_button(
-                        label="📦 Download All Plots (ZIP Archive)",
-                        data=zip_buffer,
-                        file_name=f"all_spectra_plots_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                        mime="application/zip",
-                        use_container_width=True
-                    )
-                
+                # Download button for combined plot
+                from io import BytesIO
+                buf = BytesIO()
+                fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+                buf.seek(0)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                st.markdown(f"""
+                <div style="text-align: center; margin-top: 1rem;">
+                    <a href="data:image/png;base64,{b64}" download="spectra_combined_plot.png">
+                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                       color: white; border: none; border-radius: 8px; 
+                                       padding: 0.5rem 1rem; cursor: pointer;">
+                            📥 Download Combined Plot (PNG)
+                        </button>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
             else:
                 st.warning("No spectra selected for visualization")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1262,139 +1007,156 @@ def main():
             st.subheader("Peak Detection and Analysis")
             
             if analyze_peaks_flag and filtered_spectra:
-                # Get overall x-range for sliders
-                all_x = np.concatenate([spec['data']['x'].values for spec in filtered_spectra.values()])
-                global_x_min = float(all_x.min())
-                global_x_max = float(all_x.max())
+                # NEW: Region selection sliders
+                st.markdown("### 🎯 Select Analysis Region")
+                st.markdown("*Move the sliders to select the x-axis region for peak detection. The selected region will be highlighted on the spectrum below.*")
                 
-                # NEW: Create range sliders for user-defined analysis region
-                st.markdown("#### 🎯 Define Analysis Region")
                 col1, col2 = st.columns(2)
                 with col1:
-                    x_min_peak = st.slider(
+                    x_min_selected = st.slider(
                         "Left boundary (cm⁻¹)",
-                        min_value=global_x_min,
-                        max_value=global_x_max,
-                        value=global_x_min,
+                        min_value=float(global_x_min),
+                        max_value=float(global_x_max),
+                        value=float(global_x_min),
                         step=(global_x_max - global_x_min) / 100,
-                        key="peak_x_min"
+                        key="x_min_slider"
                     )
                 with col2:
-                    x_max_peak = st.slider(
+                    x_max_selected = st.slider(
                         "Right boundary (cm⁻¹)",
-                        min_value=global_x_min,
-                        max_value=global_x_max,
-                        value=global_x_max,
+                        min_value=float(global_x_min),
+                        max_value=float(global_x_max),
+                        value=float(global_x_max),
                         step=(global_x_max - global_x_min) / 100,
-                        key="peak_x_max"
+                        key="x_max_slider"
                     )
                 
                 # Ensure x_min < x_max
-                if x_min_peak >= x_max_peak:
-                    st.warning("⚠️ Left boundary must be less than right boundary")
-                    x_min_peak, x_max_peak = x_max_peak, x_min_peak
+                if x_min_selected >= x_max_selected:
+                    st.warning("⚠️ Left boundary must be less than right boundary. Adjust the sliders.")
+                    x_min_selected, x_max_selected = x_max_selected, x_min_selected
                 
-                # Display selected region
-                st.info(f"📊 Analysis region: {x_min_peak:.1f} - {x_max_peak:.1f} cm⁻¹")
+                # Display selected region info
+                st.info(f"📊 Selected region: {x_min_selected:.1f} - {x_max_selected:.1f} cm⁻¹ (width: {x_max_selected - x_min_selected:.1f} cm⁻¹)")
                 
-                # Button to trigger peak analysis
-                analyze_button = st.button("🔍 Find Peaks in Selected Region", type="primary", use_container_width=True)
+                # Visualize the selected region on a spectrum
+                st.markdown("---")
+                st.markdown("### 📈 Region Preview with Floating Boundaries")
                 
-                if analyze_button:
-                    with st.spinner("Analyzing peaks..."):
-                        peaks_df = analyze_peaks_advanced(
-                            filtered_spectra, 
-                            x_min_peak, 
-                            x_max_peak, 
-                            x_ranges, 
-                            peak_width
-                        )
+                # Create preview plot with highlighted region
+                fig_preview, ax_preview = plt.subplots(figsize=(10, 5))
+                
+                for name, spec in filtered_spectra.items():
+                    data = spec['data']
+                    x = data['x'].values
+                    y = data['y'].values
+                    color = spec['color']
+                    
+                    ax_preview.plot(x, y, color=color, linewidth=1.5, label=name.replace('.txt', ''), alpha=0.7)
+                
+                # Highlight the selected region
+                ax_preview.axvspan(x_min_selected, x_max_selected, alpha=0.2, color='green', label='Selected region')
+                # Add vertical lines at boundaries
+                ax_preview.axvline(x_min_selected, color='green', linestyle='--', linewidth=2, alpha=0.8)
+                ax_preview.axvline(x_max_selected, color='green', linestyle='--', linewidth=2, alpha=0.8)
+                
+                ax_preview.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                ax_preview.set_ylabel(y_label, fontsize=11, fontweight='bold')
+                ax_preview.set_title("Spectra with Selected Analysis Region (Floating Boundaries)", fontsize=12, fontweight='bold')
+                ax_preview.legend(loc='best', fontsize=9, frameon=True, edgecolor='black')
+                ax_preview.tick_params(direction='in', length=5, width=1)
+                ax_preview.grid(True, alpha=0.3, linestyle='--')
+                
+                plt.tight_layout()
+                st.pyplot(fig_preview)
+                plt.close()
+                
+                # Perform peak analysis on selected region
+                st.markdown("---")
+                st.markdown("### 🔬 Peak Analysis Results")
+                
+                # Run analysis automatically when region changes (no extra button needed)
+                peaks_df = analyze_peaks_in_region(
+                    filtered_spectra, 
+                    x_min_selected, 
+                    x_max_selected, 
+                    peak_width, 
+                    peak_prominence_factor, 
+                    peak_height_factor
+                )
+                
+                if not peaks_df.empty:
+                    # Display peak statistics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Peaks Detected", len(peaks_df))
+                    with col2:
+                        st.metric("Unique Spectra", peaks_df['Spectrum'].nunique())
+                    with col3:
+                        st.metric("Avg Peak Intensity", f"{peaks_df['Intensity (a.u.)'].mean():.2f}")
+                    with col4:
+                        st.metric("Avg FWHM", f"{peaks_df['FWHM (cm⁻¹)'].mean():.2f} cm⁻¹")
+                    
+                    st.markdown("---")
+                    st.dataframe(peaks_df, use_container_width=True)
+                    
+                    # Download button for peak analysis
+                    csv = peaks_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download peak analysis as CSV",
+                        data=csv,
+                        file_name=f"peak_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                    # Visualize peaks in the selected region
+                    st.markdown("---")
+                    st.subheader("Peak Visualization in Selected Region")
+                    fig_peaks, ax_peaks = plt.subplots(figsize=(12, 6))
+                    
+                    for name, spec in filtered_spectra.items():
+                        data = spec['data']
+                        x = data['x'].values
+                        y = data['y'].values
                         
-                        if not peaks_df.empty:
-                            # Store peaks_df in session state for correlation tab
-                            st.session_state['peaks_df'] = peaks_df
-                            
-                            # Display peak statistics
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("Total Peaks Detected", len(peaks_df))
-                            with col2:
-                                st.metric("Unique Spectra", peaks_df['Spectrum'].nunique())
-                            with col3:
-                                st.metric("Avg Peak Intensity", f"{peaks_df['Intensity (a.u.)'].mean():.2f}")
-                            with col4:
-                                st.metric("Avg FWHM", f"{peaks_df['FWHM (cm⁻¹)'].mean():.2f}")
-                            
-                            st.markdown("---")
-                            st.dataframe(peaks_df, use_container_width=True)
-                            
-                            # Download button for peak analysis
-                            csv = peaks_df.to_csv(index=False)
-                            st.download_button(
-                                label="📥 Download peak analysis as CSV",
-                                data=csv,
-                                file_name=f"peak_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv"
-                            )
-                            
-                            # Visualize peaks
-                            st.markdown("---")
-                            st.subheader("Peak Visualization")
-                            
-                            # Create figure for peak visualization
-                            fig, ax = plt.subplots(figsize=(12, 6))
-                            
-                            for name, spec in filtered_spectra.items():
-                                data = spec['data']
-                                x_full = data['x'].values
-                                y_full = data['y'].values
-                                
-                                # Crop to user-defined region
-                                mask = (x_full >= x_min_peak) & (x_full <= x_max_peak)
-                                x = x_full[mask]
-                                y = y_full[mask]
-                                
-                                if x_ranges is not None:
-                                    # Further crop to x_ranges
-                                    x_cropped = []
-                                    y_cropped = []
-                                    for start, end in x_ranges:
-                                        range_mask = (x >= start) & (x <= end)
-                                        if np.any(range_mask):
-                                            x_cropped.extend(x[range_mask])
-                                            y_cropped.extend(y[range_mask])
-                                    x = np.array(x_cropped)
-                                    y = np.array(y_cropped)
-                                
-                                if len(x) == 0:
-                                    continue
-                                
-                                ax.plot(x, y, color=spec['color'], linewidth=1.5, label=name.replace('.txt', ''), alpha=0.7)
-                                
-                                # Mark peaks
-                                spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
-                                for _, peak in spec_peaks.iterrows():
-                                    ax.axvline(peak['Peak position (cm⁻¹)'], color=spec['color'], 
-                                              linestyle='--', alpha=0.5, linewidth=1)
-                                    ax.text(peak['Peak position (cm⁻¹)'], peak['Intensity (a.u.)']*0.8, 
-                                           f"{peak['Peak position (cm⁻¹)']:.1f}", 
-                                           fontsize=8, ha='center', fontweight='bold')
-                            
-                            ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                            ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
-                            ax.set_title(f"Detected Peaks Visualization (Region: {x_min_peak:.1f}-{x_max_peak:.1f} cm⁻¹)", 
-                                        fontsize=12, fontweight='bold')
-                            ax.legend(loc='best', fontsize=10, frameon=True, edgecolor='black', prop={'weight': 'bold'})
-                            ax.tick_params(direction='in', length=5, width=1)
-                            ax.grid(True, alpha=0.3, linestyle='--')
-                            
-                            plt.tight_layout()
-                            st.pyplot(fig)
-                            plt.close()
-                        else:
-                            st.warning("ℹ️ No peaks detected in the selected region. Try adjusting the x-axis boundaries or peak detection parameters.")
+                        # Crop to selected region for visualization
+                        mask = (x >= x_min_selected) & (x <= x_max_selected)
+                        x_cropped = x[mask]
+                        y_cropped = y[mask]
+                        
+                        if len(x_cropped) == 0:
+                            continue
+                        
+                        ax_peaks.plot(x_cropped, y_cropped, color=spec['color'], linewidth=1.5, label=name.replace('.txt', ''), alpha=0.7)
+                        
+                        # Mark peaks for this spectrum
+                        spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
+                        for _, peak in spec_peaks.iterrows():
+                            ax_peaks.axvline(peak['Peak position (cm⁻¹)'], color=spec['color'], 
+                                           linestyle='--', alpha=0.5, linewidth=1)
+                            ax_peaks.text(peak['Peak position (cm⁻¹)'], peak['Intensity (a.u.)'] * 0.8, 
+                                       f"{peak['Peak position (cm⁻¹)']:.1f}", 
+                                       fontsize=8, ha='center', fontweight='bold')
+                    
+                    # Add region boundaries
+                    ax_peaks.axvline(x_min_selected, color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                    ax_peaks.axvline(x_max_selected, color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                    
+                    ax_peaks.set_xlabel(x_label, fontsize=11, fontweight='bold')
+                    ax_peaks.set_ylabel(y_label, fontsize=11, fontweight='bold')
+                    ax_peaks.set_title(f"Detected Peaks in Region {x_min_selected:.1f} - {x_max_selected:.1f} cm⁻¹", fontsize=12, fontweight='bold')
+                    ax_peaks.legend(loc='best', fontsize=10, frameon=True, edgecolor='black', prop={'weight': 'bold'})
+                    ax_peaks.tick_params(direction='in', length=5, width=1)
+                    ax_peaks.grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig_peaks)
+                    plt.close()
+                    
+                    # Store peaks_df for correlation analysis
+                    st.session_state['peaks_df'] = peaks_df
                 else:
-                    st.info("🎯 Select the analysis region using the sliders above, then click 'Find Peaks in Selected Region' to detect peaks.")
+                    st.info("ℹ️ No peaks detected in the selected region. Try adjusting the region boundaries or peak detection parameters.")
             else:
                 st.info("🔍 Enable advanced peak analysis in the sidebar to detect and analyze peaks in your spectra.")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1402,117 +1164,131 @@ def main():
         with tab3:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("Parameter Correlation Analysis")
+            st.markdown("*Analyze relationships between experimental parameters and spectral features (Intensity, Area, Position, FWHM)*")
             
             if param_correlation and filtered_spectra and param_values:
-                # Check if peak analysis has been performed
-                if 'peaks_df' in st.session_state and not st.session_state['peaks_df'].empty:
-                    peaks_df = st.session_state['peaks_df']
-                    
-                    # Prepare data for correlation
+                # Try to get peak analysis results from session state or re-run analysis with global region
+                if analyze_peaks_flag and 'peaks_df' in st.session_state and not st.session_state['peaks_df'].empty:
+                    peaks_df_corr = st.session_state['peaks_df']
+                elif analyze_peaks_flag:
+                    # If no session state, use default full range
+                    global_min, global_max = get_global_x_range(filtered_spectra)
+                    peaks_df_corr = analyze_peaks_in_region(
+                        filtered_spectra, global_min, global_max, 20, 0.05, 0.1
+                    )
+                else:
+                    peaks_df_corr = pd.DataFrame()
+                
+                if not peaks_df_corr.empty:
+                    # Prepare data for correlation - collect all peaks for each spectrum
+                    # For spectra with multiple peaks, we'll analyze the most prominent peak
                     param_list = []
                     intensity_list = []
                     area_list = []
                     position_list = []
                     fwhm_list = []
+                    spectrum_names_list = []
                     
                     for name in ordered_spectra:
                         if name in param_values:
-                            spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
+                            spec_peaks = peaks_df_corr[peaks_df_corr['Spectrum'] == name.replace('.txt', '')]
                             if not spec_peaks.empty:
                                 # Take the most intense peak
                                 main_peak = spec_peaks.loc[spec_peaks['Intensity (a.u.)'].idxmax()]
                                 param_list.append(param_values[name])
                                 intensity_list.append(main_peak['Intensity (a.u.)'])
-                                area_list.append(main_peak['Area (a.u.)'])
+                                area_list.append(main_peak['Area'])
                                 position_list.append(main_peak['Peak position (cm⁻¹)'])
                                 fwhm_list.append(main_peak['FWHM (cm⁻¹)'])
+                                spectrum_names_list.append(name.replace('.txt', ''))
+                
+                if param_list and len(param_list) > 1:
+                    # Calculate correlation coefficients for all four parameters
+                    corr_intensity = pearsonr(param_list, intensity_list)[0] if len(param_list) > 2 else 0
+                    corr_area = pearsonr(param_list, area_list)[0] if len(param_list) > 2 else 0
+                    corr_position = pearsonr(param_list, position_list)[0] if len(param_list) > 2 else 0
+                    corr_fwhm = pearsonr(param_list, fwhm_list)[0] if len(param_list) > 2 else 0
                     
-                    if param_list:
-                        # Calculate correlation coefficients
-                        corr_intensity = pearsonr(param_list, intensity_list)[0] if len(param_list) > 2 else 0
-                        corr_area = pearsonr(param_list, area_list)[0] if len(param_list) > 2 else 0
-                        corr_position = pearsonr(param_list, position_list)[0] if len(param_list) > 2 else 0
-                        corr_fwhm = pearsonr(param_list, fwhm_list)[0] if len(param_list) > 2 else 0
-                        
-                        # Display correlation metrics
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Intensity Correlation", f"{corr_intensity:.3f}", 
-                                     delta="strong" if abs(corr_intensity) > 0.7 else "weak")
-                        with col2:
-                            st.metric("Area Correlation", f"{corr_area:.3f}",
-                                     delta="strong" if abs(corr_area) > 0.7 else "weak")
-                        with col3:
-                            st.metric("Position Correlation", f"{corr_position:.3f}",
-                                     delta="strong" if abs(corr_position) > 0.7 else "weak")
-                        with col4:
-                            st.metric("FWHM Correlation", f"{corr_fwhm:.3f}",
-                                     delta="strong" if abs(corr_fwhm) > 0.7 else "weak")
-                        
-                        st.markdown("---")
-                        
-                        # Create correlation plots for all four parameters
-                        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-                        
-                        # Intensity vs Parameter
-                        axes[0, 0].scatter(param_list, intensity_list, c='#1f77b4', alpha=0.6, s=80, edgecolors='white', linewidth=2)
-                        axes[0, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
-                        axes[0, 0].set_ylabel("Peak Intensity (a.u.)", fontsize=11, fontweight='bold')
-                        axes[0, 0].set_title(f"Intensity vs {param_label}\n(r = {corr_intensity:.3f})", fontsize=12, fontweight='bold')
-                        axes[0, 0].grid(True, alpha=0.3, linestyle='--')
-                        
-                        # Area vs Parameter
-                        axes[0, 1].scatter(param_list, area_list, c='#2ca02c', alpha=0.6, s=80, edgecolors='white', linewidth=2)
-                        axes[0, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
-                        axes[0, 1].set_ylabel("Peak Area (a.u.)", fontsize=11, fontweight='bold')
-                        axes[0, 1].set_title(f"Area vs {param_label}\n(r = {corr_area:.3f})", fontsize=12, fontweight='bold')
-                        axes[0, 1].grid(True, alpha=0.3, linestyle='--')
-                        
-                        # Position vs Parameter
-                        axes[1, 0].scatter(param_list, position_list, c='#d62728', alpha=0.6, s=80, edgecolors='white', linewidth=2)
-                        axes[1, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
-                        axes[1, 0].set_ylabel("Peak Position (cm⁻¹)", fontsize=11, fontweight='bold')
-                        axes[1, 0].set_title(f"Position vs {param_label}\n(r = {corr_position:.3f})", fontsize=12, fontweight='bold')
-                        axes[1, 0].grid(True, alpha=0.3, linestyle='--')
-                        
-                        # FWHM vs Parameter
-                        axes[1, 1].scatter(param_list, fwhm_list, c='#9467bd', alpha=0.6, s=80, edgecolors='white', linewidth=2)
-                        axes[1, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
-                        axes[1, 1].set_ylabel("FWHM (cm⁻¹)", fontsize=11, fontweight='bold')
-                        axes[1, 1].set_title(f"FWHM vs {param_label}\n(r = {corr_fwhm:.3f})", fontsize=12, fontweight='bold')
-                        axes[1, 1].grid(True, alpha=0.3, linestyle='--')
-                        
-                        plt.tight_layout()
-                        st.pyplot(fig)
-                        plt.close()
-                        
-                        # Show correlation data table
-                        st.markdown("---")
-                        st.subheader("Correlation Data Table")
-                        corr_data = pd.DataFrame({
-                            'Spectrum': [name.replace('.txt', '') for name in ordered_spectra if name in param_values],
-                            param_label: param_list,
-                            'Intensity (a.u.)': intensity_list,
-                            'Area (a.u.)': area_list,
-                            'Position (cm⁻¹)': position_list,
-                            'FWHM (cm⁻¹)': fwhm_list
-                        })
-                        st.dataframe(corr_data, use_container_width=True)
-                        
-                        # Download button for correlation data
-                        csv = corr_data.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download correlation data as CSV",
-                            data=csv,
-                            file_name=f"correlation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.info("ℹ️ No peaks detected for correlation analysis. Please perform peak analysis first in the Peak Analysis tab.")
+                    # Display correlation metrics in 2x2 grid
+                    st.markdown("#### 📊 Correlation Coefficients")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Intensity Correlation", f"{corr_intensity:.4f}", 
+                                 delta="strong" if abs(corr_intensity) > 0.7 else "weak")
+                        st.metric("Area Correlation", f"{corr_area:.4f}",
+                                 delta="strong" if abs(corr_area) > 0.7 else "weak")
+                    with col2:
+                        st.metric("Position (Wavenumber) Correlation", f"{corr_position:.4f}",
+                                 delta="strong" if abs(corr_position) > 0.7 else "weak")
+                        st.metric("FWHM Correlation", f"{corr_fwhm:.4f}",
+                                 delta="strong" if abs(corr_fwhm) > 0.7 else "weak")
+                    
+                    st.markdown("---")
+                    
+                    # Create correlation plots for all four parameters (2x2 grid)
+                    st.subheader("📈 Correlation Plots")
+                    fig_corr, axes_corr = plt.subplots(2, 2, figsize=(14, 12))
+                    
+                    # Intensity correlation
+                    axes_corr[0, 0].scatter(param_list, intensity_list, c='#1f77b4', alpha=0.6, s=100, edgecolors='white', linewidth=2)
+                    axes_corr[0, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes_corr[0, 0].set_ylabel("Peak Intensity (a.u.)", fontsize=11, fontweight='bold')
+                    axes_corr[0, 0].set_title(f"Intensity vs {param_label}\n(r = {corr_intensity:.4f})", fontsize=12, fontweight='bold')
+                    axes_corr[0, 0].grid(True, alpha=0.3, linestyle='--')
+                    
+                    # Area correlation
+                    axes_corr[0, 1].scatter(param_list, area_list, c='#2ca02c', alpha=0.6, s=100, edgecolors='white', linewidth=2)
+                    axes_corr[0, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes_corr[0, 1].set_ylabel("Peak Area", fontsize=11, fontweight='bold')
+                    axes_corr[0, 1].set_title(f"Area vs {param_label}\n(r = {corr_area:.4f})", fontsize=12, fontweight='bold')
+                    axes_corr[0, 1].grid(True, alpha=0.3, linestyle='--')
+                    
+                    # Position (Wavenumber) correlation
+                    axes_corr[1, 0].scatter(param_list, position_list, c='#d62728', alpha=0.6, s=100, edgecolors='white', linewidth=2)
+                    axes_corr[1, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes_corr[1, 0].set_ylabel("Peak Position (cm⁻¹)", fontsize=11, fontweight='bold')
+                    axes_corr[1, 0].set_title(f"Position vs {param_label}\n(r = {corr_position:.4f})", fontsize=12, fontweight='bold')
+                    axes_corr[1, 0].grid(True, alpha=0.3, linestyle='--')
+                    
+                    # FWHM correlation
+                    axes_corr[1, 1].scatter(param_list, fwhm_list, c='#9467bd', alpha=0.6, s=100, edgecolors='white', linewidth=2)
+                    axes_corr[1, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
+                    axes_corr[1, 1].set_ylabel("FWHM (cm⁻¹)", fontsize=11, fontweight='bold')
+                    axes_corr[1, 1].set_title(f"FWHM vs {param_label}\n(r = {corr_fwhm:.4f})", fontsize=12, fontweight='bold')
+                    axes_corr[1, 1].grid(True, alpha=0.3, linestyle='--')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig_corr)
+                    plt.close()
+                    
+                    # Show correlation data table
+                    st.markdown("---")
+                    st.subheader("📋 Correlation Data Table")
+                    corr_data = pd.DataFrame({
+                        'Spectrum': spectrum_names_list,
+                        param_label: param_list,
+                        'Intensity (a.u.)': intensity_list,
+                        'Area': area_list,
+                        'Position (cm⁻¹)': position_list,
+                        'FWHM (cm⁻¹)': fwhm_list
+                    })
+                    st.dataframe(corr_data, use_container_width=True)
+                    
+                    # Download button for correlation data
+                    csv_corr = corr_data.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download correlation data as CSV",
+                        data=csv_corr,
+                        file_name=f"correlation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
                 else:
-                    st.info("🔍 Please perform peak analysis in the 'Advanced Peak Analysis' tab first to enable correlation analysis.")
+                    if len(param_list) <= 1:
+                        st.warning("⚠️ Need at least 2 data points for correlation analysis. Please add more spectra or adjust peak detection.")
+                    else:
+                        st.info("ℹ️ Enable peak analysis and ensure peaks are detected in the selected region to perform correlation analysis.")
             else:
-                st.info("📊 Enable parameter correlation in the sidebar and assign numeric values to spectra for correlation analysis")
+                st.info("📊 Enable parameter correlation in the sidebar and assign numeric values to spectra for correlation analysis.")
             st.markdown('</div>', unsafe_allow_html=True)
         
         # Export options section
@@ -1545,7 +1321,7 @@ def main():
                 export_norm = pd.DataFrame()
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
-                    y_norm = normalize_spectrum(data['x'].values, data['y'].values, norm_method, norm_range, subtract_min_norm)
+                    y_norm = normalize_spectrum(data['x'].values, data['y'].values, norm_method, norm_range, subtract_min_normalized)
                     export_norm[f"{name.replace('.txt', '')}_x"] = data['x']
                     export_norm[f"{name.replace('.txt', '')}_y_norm"] = y_norm
                 
@@ -1567,9 +1343,9 @@ X-axis Ranges: {x_ranges if x_ranges else 'Full range'}
 Raw Offset Step: {raw_offset_step}
 Normalized Offset Step: {norm_offset_step}
 Fill Area: {fill_area}
-Subtract Minimum from Normalized: {subtract_min_norm}
-Gradient Fill: {gradient_fill}
-Plot Size: {fig_size_option}
+Gradient Fill: {gradient_fill_enabled}
+Subtract Min Normalized: {subtract_min_normalized}
+Figure Aspect Ratio: {aspect_ratio_option}
 Peak Analysis: {analyze_peaks_flag}
 Correlation Analysis: {param_correlation}
 """
@@ -1603,12 +1379,10 @@ Correlation Analysis: {param_correlation}
         - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
         - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
         - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
-        - 📐 **FWHM Calculation** - Full Width at Half Maximum for precise peak characterization
-        - 🔗 **Parameter Correlation** - Correlate spectral features (intensity, area, position, FWHM) with experimental parameters
+        - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
-        - 📏 **Multiple Normalization Methods** - Maximum intensity, area, or custom peak range normalization
-        - 📐 **Custom Plot Sizes** - Adjust graph dimensions for publication-ready figures
-        - 🎨 **Gradient Fill Option** - Beautiful gradient fills for normalized offset spectra
+        - 📐 **Multiple Normalization Methods** - Maximum intensity, area, or custom peak range normalization
+        - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
         """)
         
         st.markdown("### 📁 File Format:")
