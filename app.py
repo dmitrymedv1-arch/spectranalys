@@ -509,7 +509,8 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
     else:
         ax.grid(False)
     plt.tight_layout()
-    plt.subplots_adjust(right=0.85)
+    right_margin = max(0.82, 0.85 - (fig_width - 6) * 0.03)
+    plt.subplots_adjust(right=right_margin)
     
     return fig
 
@@ -681,8 +682,9 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             ax.grid(False)
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95, hspace=0.4, right=0.85)  # right=0.85 reserves space for legends
-    
+    right_margin = max(0.82, 0.85 - (12 - 6) * 0.03)  # для ширины 12 дюймов
+    plt.subplots_adjust(top=0.95, hspace=0.4, right=right_margin)
+
     return fig
 
 # Improved FWHM calculation function
