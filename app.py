@@ -1263,7 +1263,7 @@ def main():
                     fig_ind, ax_ind = create_individual_plot(
                         spectra, xl, yl, title, offset_step, fill, 
                         normalized, params['norm_method'], params['x_ranges'],
-                        sub_min, f_type, use_offset, False
+                        sub_min, f_type, use_offset  # 12 аргументов, apply_offset=use_offset
                     )
                     # Resize figure to selected dimensions
                     fig_ind.set_size_inches(params['figure_size'][0]/1.5, params['figure_size'][1])
