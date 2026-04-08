@@ -250,7 +250,7 @@ plt.rcParams.update({
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.05,
     'figure.facecolor': 'white',
-    'lines.linewidth': 1.2,
+    'lines.linewidth': 0.8,
     'lines.markersize': 5,
     'errorbar.capsize': 3,
 })
