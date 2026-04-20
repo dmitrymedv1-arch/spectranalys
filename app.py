@@ -264,31 +264,58 @@ def load_spectrum(uploaded_file):
     try:
         content = uploaded_file.getvalue().decode('utf-8')
         data = pd.read_csv(StringIO(content), sep='\t', header=None, names=['x', 'y'])
-        return data.dropna().sort_values('x').reset_index(drop=True)
+        # Clean data - remove NaN and inf values
+        data = data.dropna()
+        data = data.replace([np.inf, -np.inf], np.nan).dropna()
+        data = data.sort_values('x').reset_index(drop=True)
+        return data
     except Exception as e:
         st.error(f"Error loading file {uploaded_file.name}: {e}")
         return None
-
+        
 # Function to normalize spectrum
 def normalize_spectrum(x, y, norm_method, norm_range=None):
     """Normalize spectrum using different methods"""
-    # Check if array is empty
+    # Check if array is empty or contains invalid values
     if len(y) == 0:
         return y
     
+    # Clean data
+    y = np.array(y)
+    mask = np.isfinite(y)
+    if not np.any(mask):
+        return y
+    
+    y_clean = y[mask]
+    
     if norm_method == "Maximum intensity":
-        max_val = y.max()
-        return y / max_val if max_val != 0 else y
+        max_val = y_clean.max()
+        if max_val != 0 and np.isfinite(max_val):
+            result = y / max_val
+            # Replace inf and nan with 0
+            result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+            return result
+        return y
     
     elif norm_method == "Peak intensity (range)":
         if norm_range is not None:
-            mask = (x >= norm_range[0]) & (x <= norm_range[1])
-            if np.any(mask):
-                max_in_range = y[mask].max()
-                if max_in_range != 0:
-                    return y / max_in_range
-        max_val = y.max()
-        return y / max_val if max_val != 0 else y
+            mask_range = (x >= norm_range[0]) & (x <= norm_range[1])
+            if np.any(mask_range):
+                y_in_range = y[mask_range]
+                y_in_range_clean = y_in_range[np.isfinite(y_in_range)]
+                if len(y_in_range_clean) > 0:
+                    max_in_range = y_in_range_clean.max()
+                    if max_in_range != 0 and np.isfinite(max_in_range):
+                        result = y / max_in_range
+                        result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+                        return result
+        
+        max_val = y_clean.max()
+        if max_val != 0 and np.isfinite(max_val):
+            result = y / max_val
+            result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+            return result
+        return y
     
     return y
 
@@ -427,7 +454,14 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
             y_plot = y + offset
             
             if fill_area and normalized:
-                ax.fill_between(x, offset, y_plot, alpha=fill_alpha, color=color)
+                # Check if data is valid for fill_between
+                if len(x) > 0 and len(y_plot) > 0:
+                    # Clean data for fill_between
+                    mask = np.isfinite(x) & np.isfinite(y_plot) & np.isfinite(offset)
+                    x_clean = x[mask]
+                    y_clean = y_plot[mask]
+                    if len(x_clean) > 1:
+                        ax.fill_between(x_clean, offset, y_clean, alpha=fill_alpha, color=color)
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
             else:
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
@@ -653,10 +687,21 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                     
                     # Plot
                     if fill and normalized and use_offset:
-                        ax.fill_between(x, offset, y_plot, alpha=fill_alpha, color=color)
+                        # Check if data is valid
+                        if len(x) > 0 and len(y_plot) > 0:
+                            mask = np.isfinite(x) & np.isfinite(y_plot) & np.isfinite(offset)
+                            x_clean = x[mask]
+                            y_clean = y_plot[mask]
+                            if len(x_clean) > 1:
+                                ax.fill_between(x_clean, offset, y_clean, alpha=fill_alpha, color=color)
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
                     elif fill and normalized:
-                        ax.fill_between(x, 0, y_plot, alpha=fill_alpha, color=color)
+                        if len(x) > 0 and len(y_plot) > 0:
+                            mask = np.isfinite(x) & np.isfinite(y_plot)
+                            x_clean = x[mask]
+                            y_clean = y_plot[mask]
+                            if len(x_clean) > 1:
+                                ax.fill_between(x_clean, 0, y_clean, alpha=fill_alpha, color=color)
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
                     else:
                         line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
@@ -840,6 +885,15 @@ def create_peak_visualization(spectra_dict, x_range, peaks_df):
         data = spec['data']
         x = data['x'].values
         y = data['y'].values
+        
+        # Clean data
+        mask = np.isfinite(x) & np.isfinite(y)
+        x = x[mask]
+        y = y[mask]
+        
+        if len(x) == 0:
+            continue
+            
         color = spec['color']
         
         ax.plot(x, y, color=color, linewidth=1.5, label=name.replace('.txt', ''), alpha=0.7)
