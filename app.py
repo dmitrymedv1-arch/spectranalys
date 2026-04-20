@@ -443,7 +443,10 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
             
             # Apply subtract minimum intensity if requested
             if subtract_min_intensity and normalized:
-                y = y - y.min()
+                if len(y) > 0:
+                    y = y - y.min()
+                else:
+                    y = y
             
             # Apply cumulative offset if requested
             if use_offset:
