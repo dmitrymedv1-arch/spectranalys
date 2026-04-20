@@ -272,8 +272,13 @@ def load_spectrum(uploaded_file):
 # Function to normalize spectrum
 def normalize_spectrum(x, y, norm_method, norm_range=None):
     """Normalize spectrum using different methods"""
+    # Check if array is empty
+    if len(y) == 0:
+        return y
+    
     if norm_method == "Maximum intensity":
-        return y / y.max() if y.max() != 0 else y
+        max_val = y.max()
+        return y / max_val if max_val != 0 else y
     
     elif norm_method == "Peak intensity (range)":
         if norm_range is not None:
@@ -282,7 +287,8 @@ def normalize_spectrum(x, y, norm_method, norm_range=None):
                 max_in_range = y[mask].max()
                 if max_in_range != 0:
                     return y / max_in_range
-        return y / y.max() if y.max() != 0 else y
+        max_val = y.max()
+        return y / max_val if max_val != 0 else y
     
     return y
 
@@ -292,9 +298,17 @@ def align_x_ranges(spectra_dict):
     if not spectra_dict:
         return spectra_dict
     
-    # Find common x range
-    min_x = max([spec['data']['x'].min() for spec in spectra_dict.values()])
-    max_x = min([spec['data']['x'].max() for spec in spectra_dict.values()])
+    # Find common x range - skip if any spectrum has no data
+    valid_specs = {}
+    for name, spec in spectra_dict.items():
+        if len(spec['data']['x']) > 0 and len(spec['data']['y']) > 0:
+            valid_specs[name] = spec
+    
+    if not valid_specs:
+        return spectra_dict
+    
+    min_x = max([spec['data']['x'].min() for spec in valid_specs.values()])
+    max_x = min([spec['data']['x'].max() for spec in valid_specs.values()])
     
     if min_x >= max_x:
         return spectra_dict
