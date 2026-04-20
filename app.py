@@ -1352,8 +1352,11 @@ def main():
             if subtract_min_intensity:
                 for name in normalized_spectra:
                     y_vals = normalized_spectra[name]['data']['y'].values
-                    y_min = y_vals.min()
-                    normalized_spectra[name]['data']['y'] = y_vals - y_min
+                    if len(y_vals) > 0:
+                        y_min = y_vals.min()
+                        normalized_spectra[name]['data']['y'] = y_vals - y_min
+                    else:
+                        normalized_spectra[name]['data']['y'] = y_vals
             
             # Define the four visualization configurations (titles removed)
             viz_configs = [
