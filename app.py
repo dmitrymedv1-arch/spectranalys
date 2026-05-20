@@ -1130,7 +1130,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     # Get current axes position
     pos = ax_bottom.get_position()
     # Use legend_offset to control colorbar position (same offset as legend)
-    colorbar_offset = legend_offset + 0.03  # Slightly more than legend for visual balance
+    colorbar_offset = legend_offset + 0.10  # Slightly more than legend for visual balance
     # Create colorbar axes to the right with same height as bottom plot
     cbar_ax = fig.add_axes([pos.x1 + (colorbar_offset - 1.0) * 0.1, pos.y0, 0.02, pos.height])
     cbar = fig.colorbar(sm, cax=cbar_ax)
