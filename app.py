@@ -974,7 +974,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     rms_diff = np.sqrt(np.mean(y_diff_smoothed**2))
     correlation = pearsonr(y_a_interp, y_b_interp)[0]
     
-    # Create figure with two subplots
+    # Create figure with two subplots - INCREASED spacing between plots
     fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(fig_width, fig_height * 1.2),
                                              gridspec_kw={'height_ratios': [1, 0.6]})
     
@@ -997,7 +997,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     ax_top.set_xlabel(x_label, fontsize=10, fontweight='bold')
     ax_top.set_ylabel(f"Normalized {y_label}", fontsize=10, fontweight='bold')
-    ax_top.set_title(f"Spectral Comparison: {name_a} vs {name_b}", fontsize=12, fontweight='bold')
+    # REMOVED: ax_top.set_title(...)
     
     # Legend for top plot
     handles = ax_top.get_legend_handles_labels()[0]
@@ -1021,41 +1021,76 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     else:
         ax_top.grid(False)
     
-    # BOTTOM PLOT: Difference with heatmap
-    # Create 2D array for heatmap (reshape to 2D for imshow)
-    heatmap_data = y_diff_smoothed.reshape(1, -1)
-    
-    # Set symmetric color scale if requested
+    # BOTTOM PLOT: Difference with gradient fill between curve and zero line
+    # Set symmetric y-limits if requested
     if symmetric_scale:
-        vmin, vmax = -max_abs_diff, max_abs_diff
+        y_limit = max_abs_diff * 1.1
+        ax_bottom.set_ylim(-y_limit, y_limit)
     else:
-        vmin, vmax = np.min(y_diff_smoothed), np.max(y_diff_smoothed)
+        y_min = np.min(y_diff_smoothed)
+        y_max = np.max(y_diff_smoothed)
+        y_margin = (y_max - y_min) * 0.1
+        ax_bottom.set_ylim(y_min - y_margin, y_max + y_margin)
     
-    # Plot heatmap
-    im = ax_bottom.imshow(heatmap_data, aspect='auto', cmap=colormap_name,
-                          extent=[common_x.min(), common_x.max(), 0, 1],
-                          vmin=vmin, vmax=vmax, interpolation='bilinear')
+    # Create filled polygons between curve and zero line with colormap-based colors
+    # We need to create segmented fills where each segment's color corresponds to its y-value
     
-    # Add colorbar
-    cbar = plt.colorbar(im, ax=ax_bottom, orientation='vertical', pad=0.02)
-    cbar.set_label('Intensity Difference (a.u.)', fontsize=9, fontweight='bold')
+    # Create a colormap object
+    cmap = plt.cm.get_cmap(colormap_name)
     
-    # Overlay line plot of difference on top of heatmap
-    ax_bottom.plot(common_x, (y_diff_smoothed - vmin) / (vmax - vmin), 
-                  color='black', linewidth=1.2, alpha=0.7, label='Difference profile')
+    # Normalize y-values for colormap mapping
+    if symmetric_scale:
+        norm = plt.Normalize(vmin=-max_abs_diff, vmax=max_abs_diff)
+    else:
+        norm = plt.Normalize(vmin=np.min(y_diff_smoothed), vmax=np.max(y_diff_smoothed))
     
-    # Add zero line
-    zero_level = (0 - vmin) / (vmax - vmin) if vmax != vmin else 0.5
-    ax_bottom.axhline(y=zero_level, color='red', linestyle='--', 
-                     linewidth=1, alpha=0.5, label='Zero difference')
+    # Plot zero line
+    ax_bottom.axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5, zorder=1)
+    
+    # Create gradient fill between curve and zero line
+    # Iterate through segments and fill with appropriate colors
+    for i in range(len(common_x) - 1):
+        x_seg = [common_x[i], common_x[i+1], common_x[i+1], common_x[i]]
+        
+        y1 = y_diff_smoothed[i]
+        y2 = y_diff_smoothed[i+1]
+        
+        # Determine if the segment crosses zero
+        if y1 * y2 >= 0:  # Both values have same sign or one is zero
+            # Fill from curve to zero line
+            y_seg = [y1, y2, 0, 0]
+            # Use average color for the segment
+            avg_y = (y1 + y2) / 2
+            color = cmap(norm(avg_y))
+            ax_bottom.fill(x_seg, y_seg, color=color, alpha=0.6, edgecolor='none', zorder=2)
+        else:
+            # Segment crosses zero - split into two polygons
+            # Find interpolation point where y=0
+            t = -y1 / (y2 - y1)  # Interpolation factor
+            x_zero = common_x[i] + t * (common_x[i+1] - common_x[i])
+            
+            # First polygon (from y1 to 0)
+            x_seg1 = [common_x[i], x_zero, x_zero, common_x[i]]
+            y_seg1 = [y1, 0, 0, y1]
+            color1 = cmap(norm(y1/2))
+            ax_bottom.fill(x_seg1, y_seg1, color=color1, alpha=0.6, edgecolor='none', zorder=2)
+            
+            # Second polygon (from 0 to y2)
+            x_seg2 = [x_zero, common_x[i+1], common_x[i+1], x_zero]
+            y_seg2 = [0, y2, y2, 0]
+            color2 = cmap(norm(y2/2))
+            ax_bottom.fill(x_seg2, y_seg2, color=color2, alpha=0.6, edgecolor='none', zorder=2)
+    
+    # Plot the difference line on top
+    ax_bottom.plot(common_x, y_diff_smoothed, color='black', linewidth=1.2, alpha=0.8, zorder=3, label='Difference profile')
     
     # Highlight significant differences if threshold is set
     if difference_threshold > 0:
-        significant_mask = np.abs(y_diff_smoothed) > difference_threshold
-        if np.any(significant_mask):
-            # Find regions of significant difference
-            diff_indices = np.where(significant_mask)[0]
-            # Group consecutive indices
+        # Find regions where |difference| > threshold
+        above_threshold = np.abs(y_diff_smoothed) > difference_threshold
+        if np.any(above_threshold):
+            # Find contiguous regions
+            diff_indices = np.where(above_threshold)[0]
             regions = []
             start_idx = diff_indices[0]
             for i in range(1, len(diff_indices)):
@@ -1064,30 +1099,56 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
                     start_idx = diff_indices[i]
             regions.append((common_x[start_idx], common_x[diff_indices[-1]]))
             
-            # Highlight regions
+            # Highlight regions with light yellow background
+            y_min, y_max = ax_bottom.get_ylim()
             for start, end in regions:
-                ax_bottom.axvspan(start, end, alpha=0.3, color='yellow', zorder=0)
+                ax_bottom.axvspan(start, end, alpha=0.2, color='yellow', zorder=0)
     
     ax_bottom.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax_bottom.set_ylabel('Difference Intensity', fontsize=10, fontweight='bold')
-    ax_bottom.set_title(f'Spectral Difference (Sample - Reference) with Heatmap', fontsize=11, fontweight='bold')
-    ax_bottom.set_yticks([])
-    ax_bottom.tick_params(axis='x', direction='in', length=5, width=1)
+    ax_bottom.set_ylabel('Intensity Difference (a.u.)', fontsize=10, fontweight='bold')
+    # REMOVED: ax_bottom.set_title(...)
     
-    # Add legend for bottom plot if needed
-    if difference_threshold > 0 and np.any(significant_mask):
+    ax_bottom.tick_params(direction='in', length=5, width=1)
+    if show_grid:
+        ax_bottom.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax_bottom.grid(False)
+    
+    # Add horizontal line at zero
+    ax_bottom.axhline(y=0, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
+    
+    # Create colorbar with SAME WIDTH as the plots
+    # Create a scalar mappable for the colorbar
+    if symmetric_scale:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=-max_abs_diff, vmax=max_abs_diff))
+    else:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=np.min(y_diff_smoothed), vmax=np.max(y_diff_smoothed)))
+    sm.set_array([])
+    
+    # Add colorbar with adjusted position to match plot width
+    # Position: [left, bottom, width, height] in figure coordinates
+    # Get current axes position
+    pos = ax_bottom.get_position()
+    # Create colorbar axes to the right with same height as bottom plot
+    cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label('Difference Intensity (a.u.)', fontsize=9, fontweight='bold')
+    
+    # Add legend for significant differences if needed
+    if difference_threshold > 0 and np.any(above_threshold):
         from matplotlib.patches import Patch
         legend_elements = [Patch(facecolor='yellow', alpha=0.3, label=f'|Difference| > {difference_threshold:.3f}')]
         ax_bottom.legend(handles=legend_elements, loc='upper right', fontsize=8)
     
-    # Adjust layout with dynamic right margin
+    # Adjust layout with increased spacing between subplots
+    plt.subplots_adjust(hspace=0.4)  # INCREASED from 0.3 to 0.4
+    
+    # Adjust right margin for legend if needed
     if legend_position == "right":
         right_margin = min(0.92, legend_offset + 0.05)
-        plt.tight_layout()
-        plt.subplots_adjust(hspace=0.3, right=right_margin)
+        plt.subplots_adjust(right=right_margin)
     else:
         plt.tight_layout()
-        plt.subplots_adjust(hspace=0.3)
     
     return fig, (mean_diff, max_abs_diff, rms_diff, correlation)
 
