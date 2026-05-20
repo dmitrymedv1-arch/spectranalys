@@ -10,6 +10,7 @@ from datetime import datetime
 import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
+from scipy.ndimage import gaussian_filter1d
 
 # Set page config with custom theme
 st.set_page_config(
@@ -881,8 +882,7 @@ def create_peak_visualization(spectra_dict, x_range, peaks_df):
     """Create peak visualization with selected range boundaries"""
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    # Filter to include only peaks marked as included
-    included_peaks = peaks_df[peaks_df['Include'] == True]
+    # Filter to include only peaks marked as included    included_peaks = peaks_df[peaks_df['Include'] == True]
     
     for name, spec in spectra_dict.items():
         data = spec['data']
@@ -926,6 +926,171 @@ def create_peak_visualization(spectra_dict, x_range, peaks_df):
     plt.tight_layout()
     return fig
 
+# NEW FUNCTION: Create comparison plot with difference analysis
+def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
+                           x_label, y_label, norm_method, norm_range,
+                           offset_step, fill_area, fill_alpha, subtract_min_intensity,
+                           show_grid, line_width, fig_width, fig_height,
+                           legend_fontsize, legend_position, legend_offset,
+                           colormap_name, smooth_difference, smooth_sigma,
+                           symmetric_scale, difference_threshold):
+    """Create comparison plot with two spectra and difference analysis"""
+    
+    # Prepare data for spectrum A
+    x_a = spectrum_a_data['data']['x'].values
+    y_a_raw = spectrum_a_data['data']['y'].values
+    y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
+    
+    # Prepare data for spectrum B
+    x_b = spectrum_b_data['data']['x'].values
+    y_b_raw = spectrum_b_data['data']['y'].values
+    y_b_norm = normalize_spectrum(x_b, y_b_raw, norm_method, norm_range)
+    
+    # Interpolate both spectra to common x grid
+    common_x_min = max(x_a.min(), x_b.min())
+    common_x_max = min(x_a.max(), x_b.max())
+    common_x = np.linspace(common_x_min, common_x_max, 2000)
+    
+    y_a_interp = np.interp(common_x, x_a, y_a_norm)
+    y_b_interp = np.interp(common_x, x_b, y_b_norm)
+    
+    # Apply subtract minimum intensity if requested
+    if subtract_min_intensity:
+        y_a_interp = y_a_interp - y_a_interp.min()
+        y_b_interp = y_b_interp - y_b_interp.min()
+    
+    # Calculate difference (Sample - Reference)
+    y_diff = y_b_interp - y_a_interp
+    
+    # Apply smoothing if requested
+    if smooth_difference:
+        y_diff_smoothed = gaussian_filter1d(y_diff, sigma=smooth_sigma)
+    else:
+        y_diff_smoothed = y_diff
+    
+    # Calculate statistics
+    mean_diff = np.mean(y_diff_smoothed)
+    max_abs_diff = np.max(np.abs(y_diff_smoothed))
+    rms_diff = np.sqrt(np.mean(y_diff_smoothed**2))
+    correlation = pearsonr(y_a_interp, y_b_interp)[0]
+    
+    # Create figure with two subplots
+    fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(fig_width, fig_height * 1.2),
+                                             gridspec_kw={'height_ratios': [1, 0.6]})
+    
+    # TOP PLOT: Both spectra with offset
+    # Apply offset to spectra for visualization
+    offset = 0
+    y_a_plot = y_a_interp + offset
+    y_b_plot = y_b_interp + offset
+    
+    if fill_area:
+        ax_top.fill_between(common_x, offset, y_a_plot, alpha=fill_alpha, 
+                           color=spectrum_a_data['color'], label=f"{name_a} (Reference)")
+        ax_top.fill_between(common_x, offset, y_b_plot, alpha=fill_alpha, 
+                           color=spectrum_b_data['color'], label=f"{name_b} (Sample)")
+    
+    ax_top.plot(common_x, y_a_plot, color=spectrum_a_data['color'], 
+               linewidth=line_width, label=f"{name_a} (Reference)")
+    ax_top.plot(common_x, y_b_plot, color=spectrum_b_data['color'], 
+               linewidth=line_width, label=f"{name_b} (Sample)")
+    
+    ax_top.set_xlabel(x_label, fontsize=10, fontweight='bold')
+    ax_top.set_ylabel(f"Normalized {y_label}", fontsize=10, fontweight='bold')
+    ax_top.set_title(f"Spectral Comparison: {name_a} vs {name_b}", fontsize=12, fontweight='bold')
+    
+    # Legend for top plot
+    handles = ax_top.get_legend_handles_labels()[0]
+    labels = ax_top.get_legend_handles_labels()[1]
+    if legend_position == "right":
+        bbox_anchor = (legend_offset, 0.5)
+        loc = 'center left'
+    elif legend_position == "best":
+        bbox_anchor = None
+        loc = 'best'
+    else:
+        bbox_anchor = None
+        loc = legend_position
+    
+    ax_top.legend(handles, labels, loc=loc, bbox_to_anchor=bbox_anchor,
+                 fontsize=legend_fontsize, frameon=True, edgecolor='black', prop={'weight': 'bold'})
+    
+    ax_top.tick_params(direction='in', length=5, width=1)
+    if show_grid:
+        ax_top.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax_top.grid(False)
+    
+    # BOTTOM PLOT: Difference with heatmap
+    # Create 2D array for heatmap (reshape to 2D for imshow)
+    heatmap_data = y_diff_smoothed.reshape(1, -1)
+    
+    # Set symmetric color scale if requested
+    if symmetric_scale:
+        vmin, vmax = -max_abs_diff, max_abs_diff
+    else:
+        vmin, vmax = np.min(y_diff_smoothed), np.max(y_diff_smoothed)
+    
+    # Plot heatmap
+    im = ax_bottom.imshow(heatmap_data, aspect='auto', cmap=colormap_name,
+                          extent=[common_x.min(), common_x.max(), 0, 1],
+                          vmin=vmin, vmax=vmax, interpolation='bilinear')
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax_bottom, orientation='vertical', pad=0.02)
+    cbar.set_label('Intensity Difference (a.u.)', fontsize=9, fontweight='bold')
+    
+    # Overlay line plot of difference on top of heatmap
+    ax_bottom.plot(common_x, (y_diff_smoothed - vmin) / (vmax - vmin), 
+                  color='black', linewidth=1.2, alpha=0.7, label='Difference profile')
+    
+    # Add zero line
+    zero_level = (0 - vmin) / (vmax - vmin) if vmax != vmin else 0.5
+    ax_bottom.axhline(y=zero_level, color='red', linestyle='--', 
+                     linewidth=1, alpha=0.5, label='Zero difference')
+    
+    # Highlight significant differences if threshold is set
+    if difference_threshold > 0:
+        significant_mask = np.abs(y_diff_smoothed) > difference_threshold
+        if np.any(significant_mask):
+            # Find regions of significant difference
+            diff_indices = np.where(significant_mask)[0]
+            # Group consecutive indices
+            regions = []
+            start_idx = diff_indices[0]
+            for i in range(1, len(diff_indices)):
+                if diff_indices[i] > diff_indices[i-1] + 1:
+                    regions.append((common_x[start_idx], common_x[diff_indices[i-1]]))
+                    start_idx = diff_indices[i]
+            regions.append((common_x[start_idx], common_x[diff_indices[-1]]))
+            
+            # Highlight regions
+            for start, end in regions:
+                ax_bottom.axvspan(start, end, alpha=0.3, color='yellow', zorder=0)
+    
+    ax_bottom.set_xlabel(x_label, fontsize=10, fontweight='bold')
+    ax_bottom.set_ylabel('Difference Intensity', fontsize=10, fontweight='bold')
+    ax_bottom.set_title(f'Spectral Difference (Sample - Reference) with Heatmap', fontsize=11, fontweight='bold')
+    ax_bottom.set_yticks([])
+    ax_bottom.tick_params(axis='x', direction='in', length=5, width=1)
+    
+    # Add legend for bottom plot if needed
+    if difference_threshold > 0 and np.any(significant_mask):
+        from matplotlib.patches import Patch
+        legend_elements = [Patch(facecolor='yellow', alpha=0.3, label=f'|Difference| > {difference_threshold:.3f}')]
+        ax_bottom.legend(handles=legend_elements, loc='upper right', fontsize=8)
+    
+    # Adjust layout with dynamic right margin
+    if legend_position == "right":
+        right_margin = min(0.92, legend_offset + 0.05)
+        plt.tight_layout()
+        plt.subplots_adjust(hspace=0.3, right=right_margin)
+    else:
+        plt.tight_layout()
+        plt.subplots_adjust(hspace=0.3)
+    
+    return fig, (mean_diff, max_abs_diff, rms_diff, correlation)
+
 # Main app
 def main():
     # Custom header with logo
@@ -965,6 +1130,23 @@ def main():
             accept_multiple_files=True,
             key="file_uploader"
         )
+        
+        # NEW: Remove all spectra button
+        if uploaded_files and st.session_state.get('spectra_loaded', False):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.button("🗑️ Remove all spectra", type="secondary", use_container_width=True):
+                    # Clear all spectrum-related session state but preserve UI settings
+                    st.session_state.spectra_loaded = False
+                    st.session_state.cached_spectra_data = None
+                    st.session_state.peak_analysis_triggered = False
+                    st.session_state.peak_analysis_results = None
+                    st.session_state.correlation_ready = False
+                    st.session_state.excluded_peaks = set()
+                    # Clear file uploader by rerunning
+                    st.rerun()
+            with col2:
+                st.markdown("")
         
         if uploaded_files:
             st.success(f"✅ Loaded {len(uploaded_files)} files")
@@ -1324,11 +1506,12 @@ def main():
         # Filter spectra based on selection
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
         
-        # Create tabs for different analysis views
-        tab1, tab2, tab3 = st.tabs([
+        # Create tabs for different analysis views - NEW: Added comparison tab
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Combined Spectra Visualization",
             "🔍 Advanced Peak Analysis", 
-            "📈 Parameter Correlation"
+            "📈 Parameter Correlation",
+            "🔀 Compare Two Spectra"
         ])
         
         with tab1:
@@ -1719,6 +1902,197 @@ def main():
                 st.info("📊 Enable parameter correlation in the sidebar and assign numeric values to spectra for correlation analysis")
             st.markdown('</div>', unsafe_allow_html=True)
         
+        # NEW TAB: Compare Two Spectra
+        with tab4:
+            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+            st.subheader("🔀 Spectral Difference Analysis")
+            st.markdown("*Compare two spectra to identify differences and visualize them with heatmaps*")
+            
+            if len(ordered_spectra) >= 2:
+                # Select two spectra for comparison
+                col1, col2 = st.columns(2)
+                with col1:
+                    spectrum_a_name = st.selectbox(
+                        "Reference Spectrum",
+                        options=ordered_spectra,
+                        index=0,
+                        key="ref_spectrum"
+                    )
+                with col2:
+                    spectrum_b_name = st.selectbox(
+                        "Sample Spectrum",
+                        options=ordered_spectra,
+                        index=min(1, len(ordered_spectra)-1),
+                        key="sample_spectrum"
+                    )
+                
+                # Option to swap difference direction
+                swap_direction = st.checkbox("Swap difference direction (Sample - Reference)", value=True)
+                
+                st.markdown("---")
+                
+                # Difference analysis settings
+                st.markdown("#### 🎨 Difference Plot Settings")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Colormap selection (10 palettes)
+                    colormap_options = {
+                        'RdBu_r': 'Red-Blue (diverging)',
+                        'coolwarm': 'Cool-Warm (diverging)',
+                        'seismic': 'Seismic (diverging)',
+                        'PiYG': 'Pink-Green (diverging)',
+                        'BrBG': 'Brown-Blue-Green (diverging)',
+                        'RdYlBu': 'Red-Yellow-Blue (diverging)',
+                        'Spectral': 'Spectral (rainbow)',
+                        'viridis': 'Viridis (perceptual)',
+                        'plasma': 'Plasma (perceptual)',
+                        'magma': 'Magma (perceptual)'
+                    }
+                    selected_colormap = st.selectbox(
+                        "Color palette for difference heatmap",
+                        options=list(colormap_options.keys()),
+                        format_func=lambda x: colormap_options[x],
+                        index=0
+                    )
+                
+                with col2:
+                    # Smoothing option
+                    smooth_difference = st.checkbox("Apply smoothing to difference profile", value=False)
+                    smooth_sigma = 1.0
+                    if smooth_difference:
+                        smooth_sigma = st.slider(
+                            "Smoothing sigma",
+                            min_value=0.5,
+                            max_value=5.0,
+                            value=1.5,
+                            step=0.5,
+                            help="Higher values produce smoother difference profiles"
+                        )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Symmetric color scale
+                    symmetric_scale = st.checkbox("Symmetric color scale (centered at zero)", value=True)
+                
+                with col2:
+                    # Significance threshold
+                    difference_threshold = st.number_input(
+                        "Significance threshold (highlight regions with |difference| > threshold)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=0.1,
+                        step=0.01,
+                        format="%.3f",
+                        help="Regions with absolute difference exceeding this value will be highlighted"
+                    )
+                
+                st.markdown("---")
+                
+                # Get the selected spectra data
+                if spectrum_a_name and spectrum_b_name:
+                    spectrum_a = filtered_spectra[spectrum_a_name]
+                    spectrum_b = filtered_spectra[spectrum_b_name]
+                    
+                    name_a = spectrum_a_name.replace('.txt', '')
+                    name_b = spectrum_b_name.replace('.txt', '')
+                    
+                    # Create comparison plot
+                    with st.spinner("Generating comparison plot..."):
+                        fig, (mean_diff, max_abs_diff, rms_diff, correlation) = create_comparison_plot(
+                            spectrum_a, spectrum_b, name_a, name_b,
+                            x_label, y_label, norm_method, norm_range,
+                            norm_offset_step, fill_area, fill_alpha, subtract_min_intensity,
+                            show_grid, line_width, fig_width, fig_height,
+                            cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
+                            selected_colormap, smooth_difference, smooth_sigma,
+                            symmetric_scale, difference_threshold
+                        )
+                        
+                        # Display statistics
+                        st.markdown("#### 📊 Difference Statistics")
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Mean Difference", f"{mean_diff:.4f}")
+                        with col2:
+                            st.metric("Max |Difference|", f"{max_abs_diff:.4f}")
+                        with col3:
+                            st.metric("RMS Difference", f"{rms_diff:.4f}")
+                        with col4:
+                            st.metric("Spectral Correlation", f"{correlation:.4f}", 
+                                     delta="strong" if abs(correlation) > 0.7 else "weak")
+                        
+                        # Display the plot
+                        st.pyplot(fig)
+                        
+                        # Download buttons
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            # Download plot as PNG
+                            buf = BytesIO()
+                            fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                            buf.seek(0)
+                            b64 = base64.b64encode(buf.getvalue()).decode()
+                            st.markdown(f"""
+                            <div style="text-align: center;">
+                                <a href="data:image/png;base64,{b64}" download="comparison_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                                    <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                                   color: white; border: none; border-radius: 8px; 
+                                                   padding: 0.5rem 1rem; cursor: pointer;">
+                                        📥 Download Comparison Plot (PNG)
+                                    </button>
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            # Export difference data
+                            # Recalculate difference data for export
+                            x_a = spectrum_a['data']['x'].values
+                            y_a_raw = spectrum_a['data']['y'].values
+                            y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
+                            x_b = spectrum_b['data']['x'].values
+                            y_b_raw = spectrum_b['data']['y'].values
+                            y_b_norm = normalize_spectrum(x_b, y_b_raw, norm_method, norm_range)
+                            
+                            common_x_min = max(x_a.min(), x_b.min())
+                            common_x_max = min(x_a.max(), x_b.max())
+                            common_x_exp = np.linspace(common_x_min, common_x_max, 2000)
+                            y_a_interp_exp = np.interp(common_x_exp, x_a, y_a_norm)
+                            y_b_interp_exp = np.interp(common_x_exp, x_b, y_b_norm)
+                            
+                            if subtract_min_intensity:
+                                y_a_interp_exp = y_a_interp_exp - y_a_interp_exp.min()
+                                y_b_interp_exp = y_b_interp_exp - y_b_interp_exp.min()
+                            
+                            if swap_direction:
+                                y_diff_exp = y_b_interp_exp - y_a_interp_exp
+                            else:
+                                y_diff_exp = y_a_interp_exp - y_b_interp_exp
+                            
+                            diff_df = pd.DataFrame({
+                                'x': common_x_exp,
+                                f'{name_a}_normalized': y_a_interp_exp,
+                                f'{name_b}_normalized': y_b_interp_exp,
+                                'difference': y_diff_exp
+                            })
+                            
+                            csv_diff = diff_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Export Difference Data (CSV)",
+                                data=csv_diff,
+                                file_name=f"difference_data_{name_a}_{name_b}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                mime="text/csv"
+                            )
+                        
+                        plt.close(fig)
+                        
+            else:
+                st.warning("⚠️ Please load at least 2 spectra to use the comparison feature.")
+                st.info("Upload multiple .txt files to compare different samples or treatments.")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
         # Export options section
         st.markdown("---")
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -1812,7 +2186,8 @@ Correlation Analysis: {param_correlation}
         3. **Visualize** - Explore combined spectra visualization with multiple display modes
         4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
         5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
-        6. **Export Results** - Download processed data, plots, and analysis results
+        6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
+        7. **Export Results** - Download processed data, plots, and analysis results
         """)
         
         st.markdown("### ✨ Key Features:")
@@ -1822,6 +2197,7 @@ Correlation Analysis: {param_correlation}
         - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
         - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
         - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
+        - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
         - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
         - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
