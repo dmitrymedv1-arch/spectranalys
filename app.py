@@ -1117,7 +1117,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     # Add horizontal line at zero
     ax_bottom.axhline(y=0, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
     
-    # Create colorbar with SAME WIDTH as the plots
+    # Create colorbar with SAME WIDTH as the plots and OFFSET like legend
     # Create a scalar mappable for the colorbar
     if symmetric_scale:
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=-max_abs_diff, vmax=max_abs_diff))
@@ -1125,12 +1125,14 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=np.min(y_diff_smoothed), vmax=np.max(y_diff_smoothed)))
     sm.set_array([])
     
-    # Add colorbar with adjusted position to match plot width
+    # Add colorbar with adjusted position to match plot width and add offset like legend
     # Position: [left, bottom, width, height] in figure coordinates
     # Get current axes position
     pos = ax_bottom.get_position()
+    # Use legend_offset to control colorbar position (same offset as legend)
+    colorbar_offset = legend_offset + 0.03  # Slightly more than legend for visual balance
     # Create colorbar axes to the right with same height as bottom plot
-    cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
+    cbar_ax = fig.add_axes([pos.x1 + (colorbar_offset - 1.0) * 0.1, pos.y0, 0.02, pos.height])
     cbar = fig.colorbar(sm, cax=cbar_ax)
     cbar.set_label('Difference Intensity (a.u.)', fontsize=9, fontweight='bold')
     
