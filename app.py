@@ -275,8 +275,16 @@ def load_spectrum(uploaded_file):
         return None
         
 # Function to normalize spectrum
-def normalize_spectrum(x, y, norm_method, norm_range=None):
-    """Normalize spectrum using different methods"""
+def normalize_spectrum(x, y, norm_method, norm_range=None, x_ranges_for_rest=None):
+    """Normalize spectrum using different methods
+    
+    Parameters:
+    - x: x-axis values
+    - y: y-axis values
+    - norm_method: normalization method string
+    - norm_range: tuple (start, end) for peak intensity range normalization
+    - x_ranges_for_rest: list of tuples [(start1, end1), (start2, end2)] for "Maximum rest intensity" method
+    """
     # Check if array is empty or contains invalid values
     if len(y) == 0:
         return y
@@ -317,6 +325,43 @@ def normalize_spectrum(x, y, norm_method, norm_range=None):
             result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
             return result
         return y
+    
+    # NEW METHOD: Maximum rest intensity (normalize only within visible ranges when custom ranges are active)
+    elif norm_method == "Maximum rest intensity":
+        if x_ranges_for_rest is not None and len(x_ranges_for_rest) > 0:
+            # Collect all y-values from the specified ranges (visible portions)
+            y_in_ranges = []
+            for start, end in x_ranges_for_rest:
+                mask_range = (x >= start) & (x <= end)
+                if np.any(mask_range):
+                    y_in_range = y[mask_range]
+                    y_in_range_clean = y_in_range[np.isfinite(y_in_range)]
+                    if len(y_in_range_clean) > 0:
+                        y_in_ranges.extend(y_in_range_clean)
+            
+            # If we found data in the ranges, normalize by the maximum in those ranges
+            if len(y_in_ranges) > 0:
+                max_in_ranges = np.max(y_in_ranges)
+                if max_in_ranges != 0 and np.isfinite(max_in_ranges):
+                    result = y / max_in_ranges
+                    result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+                    return result
+            
+            # Fallback to global maximum if no data found in ranges
+            max_val = y_clean.max()
+            if max_val != 0 and np.isfinite(max_val):
+                result = y / max_val
+                result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+                return result
+            return y
+        else:
+            # If no ranges provided, behave like regular Maximum intensity
+            max_val = y_clean.max()
+            if max_val != 0 and np.isfinite(max_val):
+                result = y / max_val
+                result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+                return result
+            return y
     
     return y
 
@@ -607,7 +652,8 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
             data['x'].values,
             data['y'].values,
             norm_method,
-            None
+            None,
+            x_ranges  # Pass x_ranges for "Maximum rest intensity" method
         )
         normalized_spectra[name] = {
             'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
@@ -1273,9 +1319,16 @@ def main():
                     
                     # Normalization options - Area removed
                     st.markdown("#### 📐 Normalization")
+                    
+                    # Build normalization options based on x_range_option
+                    if x_range_option == "Custom ranges (multiple)":
+                        norm_options = ["Maximum intensity", "Peak intensity (range)", "Maximum rest intensity"]
+                    else:
+                        norm_options = ["Maximum intensity", "Peak intensity (range)"]
+                    
                     norm_method = st.selectbox(
                         "Normalization method",
-                        ["Maximum intensity", "Peak intensity (range)"],
+                        norm_options,
                         index=0
                     )
                     
@@ -1590,7 +1643,8 @@ def main():
                     data['x'].values,
                     data['y'].values,
                     norm_method,
-                    norm_range
+                    norm_range,
+                    x_ranges  # Pass x_ranges for "Maximum rest intensity" method
                 )
                 normalized_spectra[name] = {
                     'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
@@ -2192,7 +2246,13 @@ def main():
                 export_norm = pd.DataFrame()
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
-                    y_norm = normalize_spectrum(data['x'].values, data['y'].values, norm_method, norm_range)
+                    y_norm = normalize_spectrum(
+                        data['x'].values, 
+                        data['y'].values, 
+                        norm_method, 
+                        norm_range,
+                        x_ranges  # Pass x_ranges for "Maximum rest intensity" method
+                    )
                     # Используем временный DataFrame для каждого спектра, чтобы избежать ошибки несовпадения длин
                     temp_df = pd.DataFrame({
                         f"{name.replace('.txt', '')}_x": data['x'].values,
