@@ -1082,7 +1082,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     # We need to create segmented fills where each segment's color corresponds to its y-value
     
     # Create a colormap object
-    cmap = plt.cm.get_cmap(colormap_name)
+    cmap = plt.get_cmap(colormap_name)
     
     # Normalize y-values for colormap mapping
     if symmetric_scale:
