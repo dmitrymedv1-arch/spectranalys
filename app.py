@@ -928,7 +928,8 @@ def create_peak_visualization(spectra_dict, x_range, peaks_df):
     """Create peak visualization with selected range boundaries"""
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    # Filter to include only peaks marked as included    included_peaks = peaks_df[peaks_df['Include'] == True]
+    # Filter to include only peaks marked as included
+    included_peaks = peaks_df[peaks_df['Include'] == True]
     
     for name, spec in spectra_dict.items():
         data = spec['data']
