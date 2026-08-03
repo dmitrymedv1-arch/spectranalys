@@ -1280,7 +1280,6 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     plt.tight_layout()
     return fig
 
-# NEW FUNCTION: Prepare heatmap data from spectra
 def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
     """Prepare data matrices for heatmap generation"""
     
@@ -1295,9 +1294,35 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     if not all_x:
         return None, None, None, None
     
-    # Create common x grid
-    x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
-    x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    # Determine x range for common grid
+    # If x_ranges is specified, use union of all ranges
+    if x_ranges is not None and len(x_ranges) > 0:
+        # Collect all x values from all ranges across all spectra
+        x_min_global = float('inf')
+        x_max_global = float('-inf')
+        
+        for name in ordered_spectra:
+            if name in spectra_dict:
+                x_vals = spectra_dict[name]['data']['x'].values
+                # Check each range
+                for start, end in x_ranges:
+                    mask = (x_vals >= start) & (x_vals <= end)
+                    if np.any(mask):
+                        x_in_range = x_vals[mask]
+                        x_min_global = min(x_min_global, x_in_range.min())
+                        x_max_global = max(x_max_global, x_in_range.max())
+        
+        if x_min_global == float('inf') or x_max_global == float('-inf'):
+            # Fallback to full range if no data in ranges
+            x_min_global = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+            x_max_global = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+        
+        x_min = x_min_global
+        x_max = x_max_global
+    else:
+        # Use full common range
+        x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+        x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
     
     if x_min >= x_max:
         return None, None, None, None
@@ -1318,10 +1343,30 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
         x_orig = data['x'].values
         y_orig = data['y'].values
         
-        # Interpolate to common x grid
-        y_interp = np.interp(common_x, x_orig, y_orig)
+        # If x_ranges specified, create mask for ranges and crop data
+        if x_ranges is not None and len(x_ranges) > 0:
+            # Create mask for all ranges combined
+            mask_total = np.zeros_like(x_orig, dtype=bool)
+            for start, end in x_ranges:
+                mask_range = (x_orig >= start) & (x_orig <= end)
+                mask_total = mask_total | mask_range
+            
+            # Crop to ranges
+            if np.any(mask_total):
+                x_cropped = x_orig[mask_total]
+                y_cropped = y_orig[mask_total]
+            else:
+                # Fallback to full data if no points in ranges
+                x_cropped = x_orig
+                y_cropped = y_orig
+        else:
+            x_cropped = x_orig
+            y_cropped = y_orig
         
-        # Normalize spectrum
+        # Interpolate to common x grid
+        y_interp = np.interp(common_x, x_cropped, y_cropped)
+        
+        # Normalize spectrum (pass x_ranges for normalization method)
         y_norm = normalize_spectrum(
             common_x, 
             y_interp, 
