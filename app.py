@@ -1244,10 +1244,11 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
         colorbar_label = f"log10({colorbar_label})"
     
     # Create heatmap with imshow
-    extent = [x_grid[0], x_grid[-1], y_values[0], y_values[-1]]
+    extent = [y_values[0], y_values[-1], x_grid[0], x_grid[-1]]
     
-    # Use imshow with specified interpolation
-    im = ax.imshow(data_matrix, 
+    data_matrix_transposed = data_matrix.T
+    
+    im = ax.imshow(data_matrix_transposed, 
                    extent=extent, 
                    aspect='auto', 
                    origin='lower',
@@ -1260,8 +1261,8 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     cbar.set_label(colorbar_label, fontsize=11, fontweight='bold')
     
     # Set labels
-    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
-    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
+    ax.set_xlabel(y_label, fontsize=11, fontweight='bold')
+    ax.set_ylabel(x_label, fontsize=11, fontweight='bold')
     ax.set_title(title, fontsize=12, fontweight='bold')
     
     # Improve tick formatting
@@ -2000,7 +2001,7 @@ def main():
                         x_label, heatmap_y_label,
                         "Intensity (a.u.)",
                         heatmap_colormap, heatmap_interpolation,
-                        f"Intensity Heatmap: I = f({heatmap_y_label})",
+                        f"Intensity Heatmap: {heatmap_y_label} vs Raman shift",
                         fig_width=12, fig_height=8,
                         log_scale=use_log
                     )
@@ -2030,9 +2031,9 @@ def main():
                         x_label, heatmap_y_label,
                         "Normalized Intensity (a.u.)",
                         heatmap_colormap, heatmap_interpolation,
-                        f"Normalized Intensity Heatmap: I_norm = f({heatmap_y_label})",
+                        f"Normalized Intensity Heatmap: {heatmap_y_label} vs Raman shift",
                         fig_width=12, fig_height=8,
-                        log_scale=True  # Always use log for normalized intensity
+                        log_scale=True
                     )
                     st.pyplot(fig_heatmap_norm)
                     
