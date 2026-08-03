@@ -10,7 +10,8 @@ from datetime import datetime
 import base64
 from scipy.stats import pearsonr, ttest_ind, f_oneway, mannwhitneyu, shapiro, kstest
 from scipy.optimize import curve_fit
-from scipy.ndimage import gaussian_filter1d, savgol_filter
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import savgol_filter
 from scipy.signal import savgol_coeffs
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
