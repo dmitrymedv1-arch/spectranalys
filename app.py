@@ -1219,7 +1219,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
 # NEW FUNCTION: Create heatmap from spectra matrix
 def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label, 
                    colorbar_label, colormap, interpolation, title, 
-                   fig_width=10, fig_height=8, log_scale=False):
+                   fig_width=10, fig_height=8, log_scale=False, show_grid=True):
     """Create a heatmap from spectra matrix with specified parameters"""
     
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -1318,6 +1318,12 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     
     # Improve tick formatting
     ax.tick_params(direction='in', length=5, width=1)
+    
+    # Apply grid settings based on show_grid parameter
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
     
     plt.tight_layout()
     return fig
