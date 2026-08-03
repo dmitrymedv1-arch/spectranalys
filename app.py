@@ -59,6 +59,8 @@ if 'heatmap_y_values' not in st.session_state:
     st.session_state.heatmap_y_values = None
 if 'heatmap_ordered_names' not in st.session_state:
     st.session_state.heatmap_ordered_names = []
+if 'heatmap_y_label' not in st.session_state:
+    st.session_state.heatmap_y_label = 'Temperature (°C)'
 
 # Custom CSS for modern scientific design
 st.markdown("""
