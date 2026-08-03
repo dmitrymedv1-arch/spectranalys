@@ -1058,7 +1058,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
                linewidth=line_width, label=f"{name_b} (Sample)")
     
     ax_top.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax_top.set_ylabel(f"Normalized {y_label}", fontsize=10, fontweight='bold')
+    ax_top.set_ylabel("Norm. Intensity", fontsize=10, fontweight='bold')
     # REMOVED: ax_top.set_title(...)
     
     # Legend for top plot
@@ -1167,7 +1167,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
                 ax_bottom.axvspan(start, end, alpha=0.2, color='yellow', zorder=0)
     
     ax_bottom.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax_bottom.set_ylabel('Intensity Difference (a.u.)', fontsize=10, fontweight='bold')
+    ax_bottom.set_ylabel('Intensity Diff.', fontsize=10, fontweight='bold')
     # REMOVED: ax_bottom.set_title(...)
     
     ax_bottom.tick_params(direction='in', length=5, width=1)
