@@ -1241,13 +1241,15 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     # Transpose the matrix so that rows = Raman shift, columns = parameter
     data_matrix_transposed = data_matrix.T
     
+    # Use exact min and max values for color scale
     data_clean = data_matrix_transposed[np.isfinite(data_matrix_transposed)]
     if len(data_clean) > 0:
-        vmin = np.percentile(data_clean, 1)  # Use 1st percentile to avoid outliers
-        vmax = np.percentile(data_clean, 99)  # Use 99th percentile to avoid outliers
-    else:
+        # Используем точные минимум и максимум для цветовой шкалы
         vmin = np.nanmin(data_matrix_transposed)
         vmax = np.nanmax(data_matrix_transposed)
+    else:
+        vmin = 0
+        vmax = 1
     
     # Use imshow with specified interpolation
     im = ax.imshow(data_matrix_transposed, 
@@ -1260,9 +1262,54 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
                    vmin=vmin,
                    vmax=vmax)
     
-    # Add colorbar
+    # Add colorbar with custom ticks showing min and max values
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label(colorbar_label, fontsize=11, fontweight='bold')
+    
+    # Настраиваем деления на цветовой шкале: минимум, максимум и 3-5 промежуточных значений
+    # Определяем количество делений (5-7 всего, включая min и max)
+    n_ticks = 7  # 5 промежуточных + min + max = 7
+    tick_positions = np.linspace(vmin, vmax, n_ticks)
+    
+    # Форматируем значения для отображения
+    if log_scale:
+        # Для логарифмической шкалы показываем значения с 2 знаками после запятой
+        tick_labels = [f"{val:.2f}" for val in tick_positions]
+    else:
+        # Определяем формат в зависимости от диапазона значений
+        if abs(vmax - vmin) < 0.01:
+            # Очень маленький диапазон - показываем с 4 знаками
+            tick_labels = [f"{val:.4f}" for val in tick_positions]
+        elif abs(vmax - vmin) < 1:
+            # Маленький диапазон - показываем с 3 знаками
+            tick_labels = [f"{val:.3f}" for val in tick_positions]
+        elif abs(vmax - vmin) < 10:
+            # Средний диапазон - показываем с 2 знаками
+            tick_labels = [f"{val:.2f}" for val in tick_positions]
+        elif abs(vmax - vmin) < 1000:
+            # Большой диапазон - показываем с 1 знаком
+            tick_labels = [f"{val:.1f}" for val in tick_positions]
+        else:
+            # Очень большой диапазон - показываем целые числа
+            tick_labels = [f"{int(val)}" for val in tick_positions]
+    
+    # Устанавливаем деления на цветовой шкале
+    cbar.set_ticks(tick_positions)
+    cbar.set_ticklabels(tick_labels)
+    
+    # Добавляем рамку вокруг цветовой шкалы для лучшей читаемости
+    cbar.ax.spines['top'].set_visible(True)
+    cbar.ax.spines['bottom'].set_visible(True)
+    cbar.ax.spines['left'].set_visible(True)
+    cbar.ax.spines['right'].set_visible(True)
+    cbar.ax.spines['top'].set_color('black')
+    cbar.ax.spines['bottom'].set_color('black')
+    cbar.ax.spines['left'].set_color('black')
+    cbar.ax.spines['right'].set_color('black')
+    cbar.ax.spines['top'].set_linewidth(0.5)
+    cbar.ax.spines['bottom'].set_linewidth(0.5)
+    cbar.ax.spines['left'].set_linewidth(0.5)
+    cbar.ax.spines['right'].set_linewidth(0.5)
     
     # Set labels
     ax.set_xlabel(y_label, fontsize=11, fontweight='bold')
