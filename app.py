@@ -1268,7 +1268,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     
     # Настраиваем деления на цветовой шкале: минимум, максимум и 3-5 промежуточных значений
     # Определяем количество делений (5-7 всего, включая min и max)
-    n_ticks = 7  # 5 промежуточных + min + max = 7
+    n_ticks = 6  # 4 промежуточных + min + max = 6
     tick_positions = np.linspace(vmin, vmax, n_ticks)
     
     # Форматируем значения для отображения
