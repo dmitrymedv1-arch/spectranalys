@@ -4232,56 +4232,6 @@ def main():
                 )
                 
                 st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Этот else должен быть НА ОДНОМ УРОВНЕ с with col3: (без отступа)
-            else:
-                st.markdown("## 🎯 Welcome to SpectrAnalys")
-                st.markdown("Advanced spectroscopic data analysis platform for researchers and scientists")
-                
-                st.markdown("### 📖 Quick Start Guide:")
-                st.markdown("""
-                1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
-                2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
-                3. **Visualize** - Explore combined spectra visualization with multiple display modes
-                4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
-                5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
-                6. **Compare Spectra** - Analyze differences between two spectra with decomposition (scaling, shift, broadening)
-                7. **Statistical Analysis** - Use PCA, clustering, and statistical tests
-                8. **Export Results** - Download processed data, plots, and analysis results
-                """)
-                
-                st.markdown("### ✨ Key Features:")
-                st.markdown("""
-                - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
-                - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
-                - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
-                - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
-                - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
-                - 🔀 **Spectral Comparison with Decomposition** - Identify scaling, shift, and broadening effects
-                - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
-                - 📐 **Statistical Analysis** - PCA, clustering, correlation matrices, and statistical tests
-                - 🔧 **Advanced Processing** - Savitzky-Golay filtering, baseline correction (ALS, polynomial, rolling ball)
-                - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
-                - 📚 **Comprehensive Documentation** - Detailed guide with examples and troubleshooting
-                """)
-                
-                st.markdown("### 📁 File Format:")
-                st.markdown("Your .txt files should contain two columns separated by tabs:")
-                st.code("""
-                100.5    1250.3
-                101.2    1248.7
-                102.0    1251.5
-                ...
-                """, language="text")
-                
-                st.markdown("**Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!**")
-                
-                st.markdown("""
-                <div class="footer">
-                <p>🔬 SpectrAnalys v3.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
-                <p style="font-size: 0.75rem;">© 2024 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
-                </div>
-                """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
