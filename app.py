@@ -1231,8 +1231,8 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     if log_scale:
         # Avoid log of zero or negative values
         data_matrix = np.maximum(data_matrix, 1e-10)
-        data_matrix = np.log10(data_matrix)
-        colorbar_label = f"log10({colorbar_label})"
+        data_matrix = np.log (data_matrix)
+        colorbar_label = f"log ({colorbar_label})"
     
     # Create heatmap with imshow - transpose matrix for correct orientation
     # X-axis: parameter (y_values), Y-axis: Raman shift (x_grid)
