@@ -1297,32 +1297,36 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     
     if not all_x:
         return None, None, None, None
-    
-    # Determine x range for common grid
-    # If x_ranges is specified, use union of all ranges
+
     if x_ranges is not None and len(x_ranges) > 0:
-        # Collect all x values from all ranges across all spectra
-        x_min_global = float('inf')
-        x_max_global = float('-inf')
+        # Use the min of all range starts and max of all range ends
+        # This ensures we cover all specified ranges
+        range_starts = [start for start, end in x_ranges]
+        range_ends = [end for start, end in x_ranges]
+        x_min = min(range_starts)
+        x_max = max(range_ends)
         
+        # Verify that there is data in these ranges for all spectra
+        # If not, fallback to data-derived range
+        has_data_in_ranges = True
         for name in ordered_spectra:
             if name in spectra_dict:
                 x_vals = spectra_dict[name]['data']['x'].values
-                # Check each range
+                # Check if spectrum has any data points within the ranges
+                in_range = False
                 for start, end in x_ranges:
                     mask = (x_vals >= start) & (x_vals <= end)
                     if np.any(mask):
-                        x_in_range = x_vals[mask]
-                        x_min_global = min(x_min_global, x_in_range.min())
-                        x_max_global = max(x_max_global, x_in_range.max())
+                        in_range = True
+                        break
+                if not in_range:
+                    has_data_in_ranges = False
+                    break
         
-        if x_min_global == float('inf') or x_max_global == float('-inf'):
-            # Fallback to full range if no data in ranges
-            x_min_global = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
-            x_max_global = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
-        
-        x_min = x_min_global
-        x_max = x_max_global
+        if not has_data_in_ranges:
+            # Fallback to data-derived range if no data in specified ranges
+            x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+            x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
     else:
         # Use full common range
         x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
@@ -1361,11 +1365,18 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
                 y_cropped = y_orig[mask_total]
             else:
                 # Fallback to full data if no points in ranges
+                st.warning(f"No data points found in specified ranges for {name}. Using full spectrum.")
                 x_cropped = x_orig
                 y_cropped = y_orig
         else:
             x_cropped = x_orig
             y_cropped = y_orig
+        
+        # Interpolate to common x grid
+        # If x_cropped is empty, skip this spectrum
+        if len(x_cropped) == 0:
+            st.warning(f"Empty data after cropping for {name}. Skipping.")
+            continue
         
         # Interpolate to common x grid
         y_interp = np.interp(common_x, x_cropped, y_cropped)
