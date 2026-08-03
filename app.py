@@ -4156,55 +4156,55 @@ def main():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-            if filtered_spectra:
-                export_data = pd.DataFrame()
-                for name, spec in filtered_spectra.items():
-                    data = spec['data']
-                    temp_df = pd.DataFrame({
-                        f"{name.replace('.txt', '')}_x": data['x'].values,
-                        f"{name.replace('.txt', '')}_y": data['y'].values
-                    })
-                    if export_data.empty:
-                        export_data = temp_df
-                    else:
-                        export_data = pd.concat([export_data, temp_df], axis=1)
-                
-                csv = export_data.to_csv(index=False)
-                st.download_button(
-                    label="📥 Export Raw Data (CSV)",
-                    data=csv,
-                    file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+                if filtered_spectra:
+                    export_data = pd.DataFrame()
+                    for name, spec in filtered_spectra.items():
+                        data = spec['data']
+                        temp_df = pd.DataFrame({
+                            f"{name.replace('.txt', '')}_x": data['x'].values,
+                            f"{name.replace('.txt', '')}_y": data['y'].values
+                        })
+                        if export_data.empty:
+                            export_data = temp_df
+                        else:
+                            export_data = pd.concat([export_data, temp_df], axis=1)
+                    
+                    csv = export_data.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export Raw Data (CSV)",
+                        data=csv,
+                        file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
             
             with col2:
-            if filtered_spectra:
-                export_norm = pd.DataFrame()
-                for name, spec in filtered_spectra.items():
-                    data = spec['data']
-                    y_norm = normalize_spectrum(
-                        data['x'].values, 
-                        data['y'].values, 
-                        norm_method, 
-                        norm_range,
-                        x_ranges
+                if filtered_spectra:
+                    export_norm = pd.DataFrame()
+                    for name, spec in filtered_spectra.items():
+                        data = spec['data']
+                        y_norm = normalize_spectrum(
+                            data['x'].values, 
+                            data['y'].values, 
+                            norm_method, 
+                            norm_range,
+                            x_ranges
+                        )
+                        temp_df = pd.DataFrame({
+                            f"{name.replace('.txt', '')}_x": data['x'].values,
+                            f"{name.replace('.txt', '')}_y_norm": y_norm
+                        })
+                        if export_norm.empty:
+                            export_norm = temp_df
+                        else:
+                            export_norm = pd.concat([export_norm, temp_df], axis=1)
+                    
+                    csv_norm = export_norm.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export Normalized Data (CSV)",
+                        data=csv_norm,
+                        file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
                     )
-                    temp_df = pd.DataFrame({
-                        f"{name.replace('.txt', '')}_x": data['x'].values,
-                        f"{name.replace('.txt', '')}_y_norm": y_norm
-                    })
-                    if export_norm.empty:
-                        export_norm = temp_df
-                    else:
-                        export_norm = pd.concat([export_norm, temp_df], axis=1)
-                
-                csv_norm = export_norm.to_csv(index=False)
-                st.download_button(
-                    label="📥 Export Normalized Data (CSV)",
-                    data=csv_norm,
-                    file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
             
             with col3:
                 session_info = f"""SpectrAnalys Analysis Session
