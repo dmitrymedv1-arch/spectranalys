@@ -38,6 +38,28 @@ if 'cached_spectra_data' not in st.session_state:
 if 'excluded_peaks' not in st.session_state:
     st.session_state.excluded_peaks = set()
 
+# NEW: Heatmap session state variables
+if 'heatmap_params' not in st.session_state:
+    st.session_state.heatmap_params = {}
+if 'heatmap_param_type' not in st.session_state:
+    st.session_state.heatmap_param_type = 'Temperature (°C)'
+if 'heatmap_interpolation' not in st.session_state:
+    st.session_state.heatmap_interpolation = 'gaussian'
+if 'heatmap_colormap' not in st.session_state:
+    st.session_state.heatmap_colormap = 'viridis'
+if 'heatmap_applied' not in st.session_state:
+    st.session_state.heatmap_applied = False
+if 'heatmap_spectra_matrix' not in st.session_state:
+    st.session_state.heatmap_spectra_matrix = None
+if 'heatmap_spectra_norm_matrix' not in st.session_state:
+    st.session_state.heatmap_spectra_norm_matrix = None
+if 'heatmap_x_grid' not in st.session_state:
+    st.session_state.heatmap_x_grid = None
+if 'heatmap_y_values' not in st.session_state:
+    st.session_state.heatmap_y_values = None
+if 'heatmap_ordered_names' not in st.session_state:
+    st.session_state.heatmap_ordered_names = []
+
 # Custom CSS for modern scientific design
 st.markdown("""
 <style>
@@ -1201,6 +1223,114 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     return fig, (mean_diff, max_abs_diff, rms_diff, correlation)
 
+# NEW FUNCTION: Create heatmap from spectra matrix
+def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label, 
+                   colorbar_label, colormap, interpolation, title, 
+                   fig_width=10, fig_height=8, log_scale=False):
+    """Create a heatmap from spectra matrix with specified parameters"""
+    
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    
+    # Prepare data for heatmap
+    data_matrix = np.array(spectra_matrix)
+    
+    # Apply log scaling if requested
+    if log_scale:
+        # Avoid log of zero or negative values
+        data_matrix = np.maximum(data_matrix, 1e-10)
+        data_matrix = np.log10(data_matrix)
+        colorbar_label = f"log10({colorbar_label})"
+    
+    # Create heatmap with imshow
+    extent = [x_grid[0], x_grid[-1], y_values[0], y_values[-1]]
+    
+    # Use imshow with specified interpolation
+    im = ax.imshow(data_matrix, 
+                   extent=extent, 
+                   aspect='auto', 
+                   origin='lower',
+                   cmap=colormap,
+                   interpolation=interpolation,
+                   interpolation_stage='data' if interpolation != 'none' else None)
+    
+    # Add colorbar
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label(colorbar_label, fontsize=11, fontweight='bold')
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
+    ax.set_ylabel(y_label, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    
+    # Improve tick formatting
+    ax.tick_params(direction='in', length=5, width=1)
+    
+    plt.tight_layout()
+    return fig
+
+# NEW FUNCTION: Prepare heatmap data from spectra
+def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
+    """Prepare data matrices for heatmap generation"""
+    
+    # Get all spectra data and interpolate to common x grid
+    all_x = []
+    for name in ordered_spectra:
+        if name in spectra_dict:
+            x_vals = spectra_dict[name]['data']['x'].values
+            if len(x_vals) > 0:
+                all_x.extend(x_vals)
+    
+    if not all_x:
+        return None, None, None, None
+    
+    # Create common x grid
+    x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+    x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    
+    if x_min >= x_max:
+        return None, None, None, None
+    
+    common_x = np.linspace(x_min, x_max, 2000)
+    
+    # Prepare matrices
+    spectra_matrix = []
+    spectra_norm_matrix = []
+    y_values = []
+    
+    for name in ordered_spectra:
+        if name not in spectra_dict or name not in heatmap_params:
+            continue
+        
+        # Get spectrum data
+        data = spectra_dict[name]['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        
+        # Interpolate to common x grid
+        y_interp = np.interp(common_x, x_orig, y_orig)
+        
+        # Normalize spectrum
+        y_norm = normalize_spectrum(
+            common_x, 
+            y_interp, 
+            norm_method, 
+            norm_range,
+            x_ranges
+        )
+        
+        # Store in matrices
+        spectra_matrix.append(y_interp)
+        spectra_norm_matrix.append(y_norm)
+        
+        # Get parameter value
+        param_value = heatmap_params[name]
+        y_values.append(param_value)
+    
+    if not spectra_matrix:
+        return None, None, None, None
+    
+    return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
+
 # Main app
 def main():
     # Custom header with logo
@@ -1253,6 +1383,8 @@ def main():
                     st.session_state.peak_analysis_results = None
                     st.session_state.correlation_ready = False
                     st.session_state.excluded_peaks = set()
+                    st.session_state.heatmap_applied = False
+                    st.session_state.heatmap_params = {}
                     # Clear file uploader by rerunning
                     st.rerun()
             with col2:
@@ -1479,6 +1611,131 @@ def main():
                         
                         param_label = st.text_input("Parameter label", value="Sample number")
                     
+                    # NEW: Heatmap Parameters Section
+                    st.markdown("---")
+                    st.markdown("### 📊 Heatmap Parameters")
+                    st.markdown("*Assign numeric values (temperature, concentration, etc.) to each spectrum for heatmap visualization*")
+                    
+                    # Parameter type selection
+                    heatmap_param_type = st.selectbox(
+                        "Parameter type",
+                        options=["Temperature (°C)", "Concentration (x)", "Custom"],
+                        index=0,
+                        key="heatmap_param_type_select"
+                    )
+                    
+                    # Custom label if Custom is selected
+                    heatmap_custom_label = ""
+                    if heatmap_param_type == "Custom":
+                        heatmap_custom_label = st.text_input(
+                            "Custom parameter label",
+                            value="Parameter",
+                            key="heatmap_custom_label"
+                        )
+                    
+                    # Determine the label for the heatmap y-axis
+                    if heatmap_param_type == "Temperature (°C)":
+                        heatmap_y_label = "Temperature (°C)"
+                    elif heatmap_param_type == "Concentration (x)":
+                        heatmap_y_label = "Concentration (x)"
+                    else:
+                        heatmap_y_label = heatmap_custom_label if heatmap_custom_label else "Parameter"
+                    
+                    # Create input fields for each spectrum
+                    st.markdown("#### Assign values to spectra:")
+                    
+                    # Use a container with no rerun on change
+                    heatmap_params_temp = {}
+                    for name in ordered_spectra:
+                        display_name = name.replace('.txt', '')
+                        # Use a unique key for each input
+                        param_key = f"heatmap_{name}"
+                        heatmap_params_temp[name] = st.number_input(
+                            f"{display_name}",
+                            value=st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0),
+                            step=0.1,
+                            format="%.1f",
+                            key=param_key
+                        )
+                    
+                    # Heatmap visualization settings
+                    st.markdown("#### 🎨 Heatmap Settings")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        # Interpolation methods
+                        interpolation_options = {
+                            'none': 'None (discrete)',
+                            'bilinear': 'Bilinear (smooth)',
+                            'bicubic': 'Bicubic (smooth)',
+                            'spline16': 'Spline16 (very smooth)',
+                            'spline36': 'Spline36 (very smooth)',
+                            'gaussian': 'Gaussian (blur)',
+                            'lanczos': 'Lanczos (sharp)'
+                        }
+                        heatmap_interpolation = st.selectbox(
+                            "Interpolation method",
+                            options=list(interpolation_options.keys()),
+                            format_func=lambda x: interpolation_options[x],
+                            index=5,  # Default to 'gaussian'
+                            key="heatmap_interpolation_select"
+                        )
+                    
+                    with col2:
+                        # Colormap selection - 10 options
+                        colormap_options = {
+                            'viridis': 'Viridis (perceptual)',
+                            'plasma': 'Plasma (perceptual)',
+                            'inferno': 'Inferno (perceptual)',
+                            'magma': 'Magma (perceptual)',
+                            'cividis': 'Cividis (colorblind)',
+                            'Spectral_r': 'Spectral (rainbow)',
+                            'coolwarm': 'Cool-Warm (diverging)',
+                            'RdYlBu_r': 'Red-Yellow-Blue (diverging)',
+                            'jet': 'Jet (classic)',
+                            'turbo': 'Turbo (improved jet)'
+                        }
+                        heatmap_colormap = st.selectbox(
+                            "Color palette",
+                            options=list(colormap_options.keys()),
+                            format_func=lambda x: colormap_options[x],
+                            index=0,
+                            key="heatmap_colormap_select"
+                        )
+                    
+                    # Apply button for heatmaps
+                    apply_heatmap = st.button(
+                        "🔄 Apply for heatmaps",
+                        use_container_width=True,
+                        key="apply_heatmap_button"
+                    )
+                    
+                    if apply_heatmap:
+                        # Store heatmap parameters in session state
+                        st.session_state.heatmap_params = heatmap_params_temp
+                        st.session_state.heatmap_param_type = heatmap_param_type
+                        st.session_state.heatmap_interpolation = heatmap_interpolation
+                        st.session_state.heatmap_colormap = heatmap_colormap
+                        st.session_state.heatmap_y_label = heatmap_y_label
+                        st.session_state.heatmap_applied = True
+                        st.session_state.heatmap_ordered_names = ordered_spectra
+                        
+                        # Prepare heatmap data
+                        spectra_matrix, spectra_norm_matrix, x_grid, y_values = prepare_heatmap_data(
+                            spectra_data, ordered_spectra, heatmap_params_temp, 
+                            norm_method, norm_range, x_ranges
+                        )
+                        
+                        if spectra_matrix is not None:
+                            st.session_state.heatmap_spectra_matrix = spectra_matrix
+                            st.session_state.heatmap_spectra_norm_matrix = spectra_norm_matrix
+                            st.session_state.heatmap_x_grid = x_grid
+                            st.session_state.heatmap_y_values = y_values
+                            st.success(f"✅ Heatmap data prepared! {len(y_values)} spectra with {len(x_grid)} points each.")
+                        else:
+                            st.error("❌ Failed to prepare heatmap data. Check that all spectra are valid.")
+                            st.session_state.heatmap_applied = False
+                    
                     # Color Assignment moved to the bottom
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
@@ -1534,7 +1791,14 @@ def main():
                         'param_label': param_label if param_correlation else "Parameter",
                         'legend_fontsize': legend_fontsize,
                         'legend_position': legend_position,
-                        'legend_offset': legend_offset
+                        'legend_offset': legend_offset,
+                        # NEW: Heatmap settings
+                        'heatmap_params': st.session_state.heatmap_params,
+                        'heatmap_param_type': st.session_state.heatmap_param_type,
+                        'heatmap_interpolation': st.session_state.heatmap_interpolation,
+                        'heatmap_colormap': st.session_state.heatmap_colormap,
+                        'heatmap_y_label': st.session_state.heatmap_y_label,
+                        'heatmap_applied': st.session_state.heatmap_applied
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1705,6 +1969,104 @@ def main():
                 # Add separator between plots
                 if idx < len(viz_configs) - 1:
                     st.markdown('<div class="separator">****</div>', unsafe_allow_html=True)
+            
+            # NEW: Heatmap plots section (appears only if heatmap is applied)
+            if st.session_state.get('heatmap_applied', False):
+                st.markdown('<div class="separator">═══════════════════════════════════════════════════</div>', unsafe_allow_html=True)
+                st.subheader("🔥 Heatmap Visualization")
+                st.markdown("*Spectral evolution heatmaps showing intensity distribution as function of parameter*")
+                
+                # Get heatmap data from session state
+                spectra_matrix = st.session_state.get('heatmap_spectra_matrix')
+                spectra_norm_matrix = st.session_state.get('heatmap_spectra_norm_matrix')
+                x_grid = st.session_state.get('heatmap_x_grid')
+                y_values = st.session_state.get('heatmap_y_values')
+                heatmap_y_label = st.session_state.get('heatmap_y_label', 'Parameter')
+                heatmap_interpolation = st.session_state.get('heatmap_interpolation', 'gaussian')
+                heatmap_colormap = st.session_state.get('heatmap_colormap', 'viridis')
+                
+                if spectra_matrix is not None and x_grid is not None and y_values is not None:
+                    # Determine if we should use log scale
+                    # Use log scale if intensity values span more than 2 orders of magnitude
+                    min_val = np.min(spectra_matrix[spectra_matrix > 0]) if np.any(spectra_matrix > 0) else 1
+                    max_val = np.max(spectra_matrix)
+                    use_log = (max_val / min_val) > 100 if min_val > 0 else False
+                    
+                    # Create heatmap for raw intensity
+                    fig_heatmap = create_heatmap(
+                        spectra_matrix, x_grid, y_values,
+                        x_label, heatmap_y_label,
+                        "Intensity (a.u.)",
+                        heatmap_colormap, heatmap_interpolation,
+                        f"Intensity Heatmap: I = f({heatmap_y_label})",
+                        fig_width=12, fig_height=8,
+                        log_scale=use_log
+                    )
+                    st.pyplot(fig_heatmap)
+                    
+                    # Download button for heatmap
+                    buf = BytesIO()
+                    fig_heatmap.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                    buf.seek(0)
+                    b64 = base64.b64encode(buf.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64}" download="heatmap_intensity_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.8rem;">
+                                📥 Download Heatmap (Intensity) (PNG, 600 dpi)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig_heatmap)
+                    
+                    # Create heatmap for normalized intensity
+                    fig_heatmap_norm = create_heatmap(
+                        spectra_norm_matrix, x_grid, y_values,
+                        x_label, heatmap_y_label,
+                        "Normalized Intensity (a.u.)",
+                        heatmap_colormap, heatmap_interpolation,
+                        f"Normalized Intensity Heatmap: I_norm = f({heatmap_y_label})",
+                        fig_width=12, fig_height=8,
+                        log_scale=True  # Always use log for normalized intensity
+                    )
+                    st.pyplot(fig_heatmap_norm)
+                    
+                    # Download button for normalized heatmap
+                    buf = BytesIO()
+                    fig_heatmap_norm.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                    buf.seek(0)
+                    b64 = base64.b64encode(buf.getvalue()).decode()
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0rem; margin-bottom: 1rem;">
+                        <a href="data:image/png;base64,{b64}" download="heatmap_normalized_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                           color: white; border: none; border-radius: 8px; 
+                                           padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.8rem;">
+                                📥 Download Heatmap (Normalized) (PNG, 600 dpi)
+                            </button>
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    plt.close(fig_heatmap_norm)
+                    
+                    # Show parameter values used
+                    st.markdown("#### 📊 Heatmap Parameters Used:")
+                    param_df = pd.DataFrame({
+                        'Spectrum': [name.replace('.txt', '') for name in st.session_state.heatmap_ordered_names if name in st.session_state.heatmap_params],
+                        heatmap_y_label: [st.session_state.heatmap_params[name] for name in st.session_state.heatmap_ordered_names if name in st.session_state.heatmap_params]
+                    })
+                    st.dataframe(param_df, use_container_width=True)
+                    
+                    # Add interpolation and colormap info
+                    st.caption(f"Interpolation: {heatmap_interpolation} | Colormap: {heatmap_colormap} | Log scale: {'Yes' if use_log else 'No'} for intensity, Yes for normalized")
+                else:
+                    st.warning("⚠️ Heatmap data not available. Please click 'Apply for heatmaps' in the sidebar.")
+            else:
+                # Show hint for heatmap
+                st.info("💡 To generate heatmaps, assign numeric values to spectra in the sidebar and click 'Apply for heatmaps'.")
             
             st.markdown('</div>', unsafe_allow_html=True)
         
@@ -2322,6 +2684,7 @@ Correlation Analysis: {param_correlation}
         - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
         - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
         - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
+        - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
         - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
         - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
