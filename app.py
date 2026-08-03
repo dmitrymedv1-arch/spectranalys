@@ -1196,7 +1196,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     # Create colorbar axes to the right with same height as bottom plot
     cbar_ax = fig.add_axes([pos.x1 + (colorbar_offset - 1.0) * 0.1, pos.y0, 0.02, pos.height])
     cbar = fig.colorbar(sm, cax=cbar_ax)
-    cbar.set_label('Difference Intensity (a.u.)', fontsize=9, fontweight='bold')
+    cbar.set_label('Differences in Intensities', fontsize=9, fontweight='bold')
     
     # Add legend for significant differences if needed
     if difference_threshold > 0 and np.any(above_threshold):
