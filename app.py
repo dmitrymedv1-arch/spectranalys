@@ -2252,9 +2252,9 @@ def main():
                                 savgol_order = st.slider("Polynomial order", min_value=2, max_value=5, value=3, step=1, key="savgol_order")
                                 if savgol_order >= savgol_window:
                                     st.warning("Order must be less than window length")
-                    else:
-                        savgol_window = None
-                        savgol_order = None
+                        else:
+                            savgol_window = None
+                            savgol_order = None
                     
                     with st.expander("📐 Baseline Correction"):
                         baseline_method = st.selectbox("Baseline correction method", ["None", "ALS", "Polynomial", "Rolling ball"], key="baseline_method")
