@@ -1250,9 +1250,13 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     # Transpose the matrix so that rows = Raman shift, columns = parameter
     data_matrix_transposed = data_matrix.T
     
-    # Set vmin and vmax for colorbar to show full range
-    vmin = np.nanmin(data_matrix_transposed)
-    vmax = np.nanmax(data_matrix_transposed)
+    data_clean = data_matrix_transposed[np.isfinite(data_matrix_transposed)]
+    if len(data_clean) > 0:
+        vmin = np.percentile(data_clean, 1)  # Use 1st percentile to avoid outliers
+        vmax = np.percentile(data_clean, 99)  # Use 99th percentile to avoid outliers
+    else:
+        vmin = np.nanmin(data_matrix_transposed)
+        vmax = np.nanmax(data_matrix_transposed)
     
     # Use imshow with specified interpolation
     im = ax.imshow(data_matrix_transposed, 
