@@ -8,22 +8,9 @@ from io import StringIO, BytesIO
 import re
 from datetime import datetime
 import base64
-from scipy.stats import pearsonr, ttest_ind, f_oneway, mannwhitneyu, shapiro, kstest
+from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import savgol_filter
-from scipy.signal import savgol_coeffs
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans, AgglomerativeClustering
-from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.spatial.distance import pdist, squareform
-from scipy.linalg import lstsq
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import warnings
-warnings.filterwarnings('ignore')
 
 # Set page config with custom theme
 st.set_page_config(
@@ -76,16 +63,6 @@ if 'heatmap_y_label' not in st.session_state:
     st.session_state.heatmap_y_label = 'Temperature (°C)'
 if 'heatmap_x_ranges' not in st.session_state:
     st.session_state.heatmap_x_ranges = None
-
-# NEW: Statistical analysis session state
-if 'pca_results' not in st.session_state:
-    st.session_state.pca_results = None
-if 'cluster_results' not in st.session_state:
-    st.session_state.cluster_results = None
-if 'statistical_tests_results' not in st.session_state:
-    st.session_state.statistical_tests_results = None
-if 'difference_decomposition_results' not in st.session_state:
-    st.session_state.difference_decomposition_results = None
 
 # Custom CSS for modern scientific design
 st.markdown("""
@@ -277,6 +254,9 @@ plt.rcParams.update({
     'axes.facecolor': '#f8f9fa',
     'axes.edgecolor': '#2c3e50',
     'axes.linewidth': 1.2,
+    # 'axes.grid': True,
+    # 'grid.alpha': 0.3,
+    # 'grid.linestyle': '--',
     'xtick.color': '#2c3e50',
     'ytick.color': '#2c3e50',
     'xtick.labelsize': 10,
@@ -502,10 +482,8 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                            offset_step, fill_area, normalized, use_offset,
                            x_ranges, subtract_min_intensity, fill_alpha,
                            show_grid, line_width, fig_width, fig_height,
-                           legend_fontsize=8, legend_position="right", legend_offset=1.02,
-                           savgol_filter_window=None, savgol_filter_order=None,
-                           baseline_method=None, baseline_params=None):
-    """Create individual scientific plot with download button and advanced processing options"""
+                           legend_fontsize=8, legend_position="right", legend_offset=1.02):
+    """Create individual scientific plot with download button"""
     
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     
@@ -523,32 +501,6 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
             color = spec['color']
             
             display_name = name.replace('.txt', '')
-            
-            # Apply Savitzky-Golay filter if requested
-            if savgol_filter_window is not None and savgol_filter_order is not None:
-                if len(y) >= savgol_filter_window:
-                    try:
-                        y = savgol_filter(y, savgol_filter_window, savgol_filter_order)
-                    except:
-                        pass  # Keep original if filtering fails
-            
-            # Apply baseline correction if requested
-            if baseline_method is not None and baseline_method != "None":
-                if baseline_method == "ALS":
-                    # Asymmetric Least Squares baseline
-                    if baseline_params is not None:
-                        lam = baseline_params.get('lambda', 1e5)
-                        p = baseline_params.get('p', 0.01)
-                        y = als_baseline_correction(y, lam=lam, p=p)
-                elif baseline_method == "Polynomial":
-                    # Polynomial baseline with iterative peak removal
-                    if baseline_params is not None:
-                        degree = baseline_params.get('degree', 3)
-                        y = polynomial_baseline_correction(x, y, degree=degree)
-                elif baseline_method == "Rolling ball":
-                    if baseline_params is not None:
-                        window = baseline_params.get('window', 50)
-                        y = rolling_ball_baseline_correction(x, y, window=window)
             
             # Apply subtract minimum intensity if requested
             if subtract_min_intensity and normalized:
@@ -594,30 +546,6 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                 color = spec['color']
                 
                 display_name = name.replace('.txt', '')
-                
-                # Apply Savitzky-Golay filter if requested
-                if savgol_filter_window is not None and savgol_filter_order is not None:
-                    if len(y_full) >= savgol_filter_window:
-                        try:
-                            y_full = savgol_filter(y_full, savgol_filter_window, savgol_filter_order)
-                        except:
-                            pass
-                
-                # Apply baseline correction if requested
-                if baseline_method is not None and baseline_method != "None":
-                    if baseline_method == "ALS":
-                        if baseline_params is not None:
-                            lam = baseline_params.get('lambda', 1e5)
-                            p = baseline_params.get('p', 0.01)
-                            y_full = als_baseline_correction(y_full, lam=lam, p=p)
-                    elif baseline_method == "Polynomial":
-                        if baseline_params is not None:
-                            degree = baseline_params.get('degree', 3)
-                            y_full = polynomial_baseline_correction(x_full, y_full, degree=degree)
-                    elif baseline_method == "Rolling ball":
-                        if baseline_params is not None:
-                            window = baseline_params.get('window', 50)
-                            y_full = rolling_ball_baseline_correction(x_full, y_full, window=window)
                 
                 # Crop to current range
                 mask = (x_full >= start) & (x_full <= end)
@@ -728,9 +656,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
                          norm_method, x_ranges=None, fill_alpha=0.3,
                          show_grid=True, line_width=1.5,
-                         legend_fontsize=8, legend_position="right", legend_offset=1.02,
-                         savgol_filter_window=None, savgol_filter_order=None,
-                         baseline_method=None, baseline_params=None):
+                         legend_fontsize=8, legend_position="right", legend_offset=1.02):
     """Create scientific plot with all four visualization types in vertical subplots"""
     
     # Prepare normalized spectra
@@ -777,30 +703,6 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 
                 display_name = name.replace('.txt', '')
                 
-                # Apply Savitzky-Golay filter if requested
-                if savgol_filter_window is not None and savgol_filter_order is not None:
-                    if len(y) >= savgol_filter_window:
-                        try:
-                            y = savgol_filter(y, savgol_filter_window, savgol_filter_order)
-                        except:
-                            pass
-                
-                # Apply baseline correction if requested
-                if baseline_method is not None and baseline_method != "None":
-                    if baseline_method == "ALS":
-                        if baseline_params is not None:
-                            lam = baseline_params.get('lambda', 1e5)
-                            p = baseline_params.get('p', 0.01)
-                            y = als_baseline_correction(y, lam=lam, p=p)
-                    elif baseline_method == "Polynomial":
-                        if baseline_params is not None:
-                            degree = baseline_params.get('degree', 3)
-                            y = polynomial_baseline_correction(x, y, degree=degree)
-                    elif baseline_method == "Rolling ball":
-                        if baseline_params is not None:
-                            window = baseline_params.get('window', 50)
-                            y = rolling_ball_baseline_correction(x, y, window=window)
-                
                 # Apply cumulative offset if requested
                 if use_offset:
                     offset = idx * offset_step
@@ -831,30 +733,6 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                     color = spec['color']
                     
                     display_name = name.replace('.txt', '')
-                    
-                    # Apply Savitzky-Golay filter if requested
-                    if savgol_filter_window is not None and savgol_filter_order is not None:
-                        if len(y_full) >= savgol_filter_window:
-                            try:
-                                y_full = savgol_filter(y_full, savgol_filter_window, savgol_filter_order)
-                            except:
-                                pass
-                    
-                    # Apply baseline correction if requested
-                    if baseline_method is not None and baseline_method != "None":
-                        if baseline_method == "ALS":
-                            if baseline_params is not None:
-                                lam = baseline_params.get('lambda', 1e5)
-                                p = baseline_params.get('p', 0.01)
-                                y_full = als_baseline_correction(y_full, lam=lam, p=p)
-                        elif baseline_method == "Polynomial":
-                            if baseline_params is not None:
-                                degree = baseline_params.get('degree', 3)
-                                y_full = polynomial_baseline_correction(x_full, y_full, degree=degree)
-                        elif baseline_method == "Rolling ball":
-                            if baseline_params is not None:
-                                window = baseline_params.get('window', 50)
-                                y_full = rolling_ball_baseline_correction(x_full, y_full, window=window)
                     
                     # Crop to current range
                     mask = (x_full >= start) & (x_full <= end)
@@ -1181,6 +1059,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     ax_top.set_xlabel(x_label, fontsize=10, fontweight='bold')
     ax_top.set_ylabel(f"Normalized {y_label}", fontsize=10, fontweight='bold')
+    # REMOVED: ax_top.set_title(...)
     
     # Legend for top plot
     handles = ax_top.get_legend_handles_labels()[0]
@@ -1214,6 +1093,9 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
         y_max = np.max(y_diff_smoothed)
         y_margin = (y_max - y_min) * 0.1
         ax_bottom.set_ylim(y_min - y_margin, y_max + y_margin)
+    
+    # Create filled polygons between curve and zero line with colormap-based colors
+    # We need to create segmented fills where each segment's color corresponds to its y-value
     
     # Create a colormap object
     cmap = plt.get_cmap(colormap_name)
@@ -1286,6 +1168,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     ax_bottom.set_xlabel(x_label, fontsize=10, fontweight='bold')
     ax_bottom.set_ylabel('Intensity Difference (a.u.)', fontsize=10, fontweight='bold')
+    # REMOVED: ax_bottom.set_title(...)
     
     ax_bottom.tick_params(direction='in', length=5, width=1)
     if show_grid:
@@ -1333,562 +1216,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     return fig, (mean_diff, max_abs_diff, rms_diff, correlation)
 
-# NEW FUNCTION: Create comparison plot with difference decomposition
-def create_comparison_plot_with_decomposition(spectrum_a_data, spectrum_b_data, name_a, name_b,
-                                              x_label, y_label, norm_method, norm_range,
-                                              offset_step, fill_area, fill_alpha, subtract_min_intensity,
-                                              show_grid, line_width, fig_width, fig_height,
-                                              legend_fontsize, legend_position, legend_offset,
-                                              colormap_name, smooth_difference, smooth_sigma,
-                                              symmetric_scale, difference_threshold):
-    """Create comparison plot with difference decomposition (scaling, shift, broadening)"""
-    
-    # Prepare data for spectrum A
-    x_a = spectrum_a_data['data']['x'].values
-    y_a_raw = spectrum_a_data['data']['y'].values
-    y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
-    
-    # Prepare data for spectrum B
-    x_b = spectrum_b_data['data']['x'].values
-    y_b_raw = spectrum_b_data['data']['y'].values
-    y_b_norm = normalize_spectrum(x_b, y_b_raw, norm_method, norm_range)
-    
-    # Interpolate both spectra to common x grid
-    common_x_min = max(x_a.min(), x_b.min())
-    common_x_max = min(x_a.max(), x_b.max())
-    common_x = np.linspace(common_x_min, common_x_max, 2000)
-    
-    y_a_interp = np.interp(common_x, x_a, y_a_norm)
-    y_b_interp = np.interp(common_x, x_b, y_b_norm)
-    
-    # Apply subtract minimum intensity if requested
-    if subtract_min_intensity:
-        y_a_interp = y_a_interp - y_a_interp.min()
-        y_b_interp = y_b_interp - y_b_interp.min()
-    
-    # --- DIFFERENCE DECOMPOSITION ---
-    
-    # 1. Determine optimal scaling factor
-    # Minimize MSE: find k such that k * y_a_interp ≈ y_b_interp
-    # k_opt = sum(y_a_interp * y_b_interp) / sum(y_a_interp**2)
-    if np.sum(y_a_interp**2) > 0:
-        k_opt = np.sum(y_a_interp * y_b_interp) / np.sum(y_a_interp**2)
-        # Clamp to reasonable range
-        k_opt = np.clip(k_opt, 0.1, 10.0)
-    else:
-        k_opt = 1.0
-    
-    y_scaled = k_opt * y_a_interp
-    
-    # 2. Determine shift by cross-correlation
-    # Calculate cross-correlation between scaled reference and sample
-    correlation = np.correlate(y_b_interp, y_scaled, mode='same')
-    shift_idx = np.argmax(correlation) - len(y_scaled)//2
-    # Convert to x units
-    dx = common_x[1] - common_x[0]
-    shift_value = shift_idx * dx
-    
-    # Apply shift to scaled reference
-    if shift_value != 0:
-        # Shift using interpolation
-        y_shifted = np.interp(common_x, common_x - shift_value, y_scaled, left=0, right=0)
-    else:
-        y_shifted = y_scaled
-    
-    # 3. Determine broadening
-    # Compare FWHM of peaks in reference and sample
-    # Find peaks in both spectra
-    peaks_a, _ = find_peaks(y_a_interp, height=np.max(y_a_interp)*0.05, prominence=np.max(y_a_interp)*0.03, distance=5)
-    peaks_b, _ = find_peaks(y_b_interp, height=np.max(y_b_interp)*0.05, prominence=np.max(y_b_interp)*0.03, distance=5)
-    
-    fwhm_ratios = []
-    if len(peaks_a) > 0 and len(peaks_b) > 0:
-        # Match peaks based on position
-        for peak_a_idx in peaks_a:
-            peak_a_x = common_x[peak_a_idx]
-            # Find nearest peak in sample
-            nearest_idx = np.argmin(np.abs(common_x[peaks_b] - peak_a_x))
-            if nearest_idx < len(peaks_b):
-                peak_b_idx = peaks_b[nearest_idx]
-                # Check if peaks are close enough
-                if abs(common_x[peak_b_idx] - peak_a_x) < 5.0:  # Within 5 cm^-1
-                    fwhm_a = calculate_fwhm(common_x, y_a_interp, peak_a_idx)
-                    fwhm_b = calculate_fwhm(common_x, y_b_interp, peak_b_idx)
-                    if fwhm_a > 0 and fwhm_b > 0:
-                        fwhm_ratios.append(fwhm_b / fwhm_a)
-    
-    if fwhm_ratios:
-        broadening_factor = np.median(fwhm_ratios)
-    else:
-        broadening_factor = 1.0
-    
-    # 4. Apply broadening to shifted reference
-    # Simple broadening: smooth the shifted reference
-    if broadening_factor > 1.0:
-        sigma = (broadening_factor - 1.0) * 2.0  # Empirical conversion
-        y_broadened = gaussian_filter1d(y_shifted, sigma=min(sigma, 5.0))
-    else:
-        y_broadened = y_shifted
-    
-    # 5. Calculate residual difference (unexplained)
-    y_residual = y_b_interp - y_broadened
-    
-    # 6. Calculate variance explained by each component
-    total_var = np.var(y_b_interp - y_a_interp)
-    if total_var > 0:
-        # Variance explained by scaling
-        scaled_var = np.var(y_scaled - y_a_interp)
-        # Variance explained by shift
-        shifted_var = np.var(y_shifted - y_scaled)
-        # Variance explained by broadening
-        broadened_var = np.var(y_broadened - y_shifted)
-        # Residual variance
-        residual_var = np.var(y_residual)
-        
-        # Calculate percentages
-        scaling_pct = (scaled_var / total_var) * 100 if total_var > 0 else 0
-        shift_pct = (shifted_var / total_var) * 100 if total_var > 0 else 0
-        broadening_pct = (broadened_var / total_var) * 100 if total_var > 0 else 0
-        residual_pct = (residual_var / total_var) * 100 if total_var > 0 else 0
-    else:
-        scaling_pct = shift_pct = broadening_pct = residual_pct = 0
-    
-    # Create figure with 3 rows: original spectra, decomposition, residual
-    fig = plt.figure(figsize=(fig_width, fig_height * 1.8))
-    gs = fig.add_gridspec(3, 1, height_ratios=[1, 1, 0.8], hspace=0.3)
-    
-    # Row 1: Original spectra with difference
-    ax1 = fig.add_subplot(gs[0])
-    
-    # Plot spectra
-    ax1.plot(common_x, y_a_interp, color=spectrum_a_data['color'], linewidth=line_width, 
-             label=f'{name_a} (Reference)', alpha=0.7)
-    ax1.plot(common_x, y_b_interp, color=spectrum_b_data['color'], linewidth=line_width, 
-             label=f'{name_b} (Sample)', alpha=0.7)
-    
-    # Plot difference
-    ax1.fill_between(common_x, 0, y_b_interp - y_a_interp, alpha=0.3, color='gray', label='Difference')
-    ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.3)
-    
-    ax1.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax1.set_ylabel(f'Normalized {y_label}', fontsize=10, fontweight='bold')
-    ax1.legend(loc='best', fontsize=legend_fontsize, frameon=True, edgecolor='black')
-    ax1.tick_params(direction='in', length=5, width=1)
-    if show_grid:
-        ax1.grid(True, alpha=0.3, linestyle='--')
-    
-    # Row 2: Decomposition components
-    ax2 = fig.add_subplot(gs[1])
-    
-    # Plot the transformed reference and sample
-    ax2.plot(common_x, y_b_interp, color='black', linewidth=line_width, 
-             label=f'{name_b} (Sample)', alpha=0.7)
-    ax2.plot(common_x, y_broadened, color='red', linewidth=line_width, 
-             label='Reconstructed (scaled + shifted + broadened)', alpha=0.7, linestyle='--')
-    
-    # Show individual components
-    ax2.plot(common_x, y_scaled, color='blue', linewidth=1.2, 
-             label=f'Scaled (k={k_opt:.3f})', alpha=0.5, linestyle=':')
-    ax2.plot(common_x, y_shifted, color='green', linewidth=1.2, 
-             label=f'Shifted (Δx={shift_value:.2f} cm⁻¹)', alpha=0.5, linestyle='-.')
-    
-    ax2.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax2.set_ylabel(f'Normalized {y_label}', fontsize=10, fontweight='bold')
-    ax2.legend(loc='best', fontsize=legend_fontsize-1, frameon=True, edgecolor='black')
-    ax2.tick_params(direction='in', length=5, width=1)
-    if show_grid:
-        ax2.grid(True, alpha=0.3, linestyle='--')
-    
-    # Row 3: Residual difference
-    ax3 = fig.add_subplot(gs[2])
-    
-    # Plot residual
-    ax3.plot(common_x, y_residual, color='purple', linewidth=line_width, label='Residual (unexplained)')
-    ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-    
-    # Highlight regions with large residuals
-    residual_threshold = 0.1 * np.max(np.abs(y_residual)) if np.max(np.abs(y_residual)) > 0 else 0.01
-    if residual_threshold > 0:
-        large_residual = np.abs(y_residual) > residual_threshold
-        if np.any(large_residual):
-            # Find contiguous regions
-            res_indices = np.where(large_residual)[0]
-            if len(res_indices) > 0:
-                y_min, y_max = ax3.get_ylim()
-                start_idx = res_indices[0]
-                for i in range(1, len(res_indices)):
-                    if res_indices[i] > res_indices[i-1] + 1:
-                        ax3.axvspan(common_x[start_idx], common_x[res_indices[i-1]], alpha=0.2, color='yellow')
-                        start_idx = res_indices[i]
-                ax3.axvspan(common_x[start_idx], common_x[res_indices[-1]], alpha=0.2, color='yellow')
-    
-    # Calculate residual statistics
-    residual_std = np.std(y_residual)
-    max_residual = np.max(np.abs(y_residual))
-    
-    ax3.set_xlabel(x_label, fontsize=10, fontweight='bold')
-    ax3.set_ylabel('Residual (a.u.)', fontsize=10, fontweight='bold')
-    ax3.legend(loc='best', fontsize=legend_fontsize, frameon=True, edgecolor='black')
-    ax3.tick_params(direction='in', length=5, width=1)
-    if show_grid:
-        ax3.grid(True, alpha=0.3, linestyle='--')
-    
-    # Add statistics text box
-    stats_text = f"""Decomposition Statistics:
-    • Scaling factor: {k_opt:.3f}
-    • Peak shift: {shift_value:+.2f} cm⁻¹
-    • Broadening factor: {broadening_factor:.3f}
-    • Residual RMS: {residual_std:.4f}
-    
-    Variance explained:
-    • Scaling: {scaling_pct:.1f}%
-    • Shift: {shift_pct:.1f}%
-    • Broadening: {broadening_pct:.1f}%
-    • Residual: {residual_pct:.1f}%"""
-    
-    plt.figtext(0.85, 0.25, stats_text, fontsize=8, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="black", alpha=0.8))
-    
-    plt.tight_layout()
-    plt.subplots_adjust(right=0.85)
-    
-    # Return decomposition results
-    decomp_results = {
-        'scaling_factor': k_opt,
-        'shift_value': shift_value,
-        'broadening_factor': broadening_factor,
-        'residual_std': residual_std,
-        'max_residual': max_residual,
-        'scaling_pct': scaling_pct,
-        'shift_pct': shift_pct,
-        'broadening_pct': broadening_pct,
-        'residual_pct': residual_pct
-    }
-    
-    return fig, decomp_results
-
-# NEW FUNCTION: Baseline correction methods
-def als_baseline_correction(y, lam=1e5, p=0.01, max_iter=100):
-    """Asymmetric Least Squares baseline correction"""
-    y = np.array(y, dtype=float)
-    L = len(y)
-    # Build the difference matrix
-    D = np.diff(np.eye(L), 2)
-    D = D.astype(float)
-    # Solve the system (I + lam * D.T @ D) * z = y
-    from scipy.sparse import diags, eye
-    from scipy.sparse.linalg import spsolve
-    
-    # Use sparse matrices for efficiency
-    I = eye(L)
-    D = diags([1, -2, 1], [0, 1, 2], shape=(L-2, L))
-    A = I + lam * D.T @ D
-    z = spsolve(A, y)
-    
-    # Iteratively update weights
-    for _ in range(max_iter):
-        z_old = z
-        w = np.where(y > z, p, 1-p)
-        W = diags(w)
-        A = W + lam * D.T @ D
-        z = spsolve(A, W @ y)
-        if np.linalg.norm(z - z_old) < 1e-6:
-            break
-    
-    return y - z
-
-def polynomial_baseline_correction(x, y, degree=3, n_iter=10, threshold=3.0):
-    """Polynomial baseline correction with iterative peak removal"""
-    y = np.array(y, dtype=float)
-    x = np.array(x, dtype=float)
-    
-    # Initial polynomial fit
-    coeffs = np.polyfit(x, y, degree)
-    baseline = np.polyval(coeffs, x)
-    residual = y - baseline
-    
-    # Iterative refinement: remove points with positive residuals (peaks)
-    mask = np.ones(len(y), dtype=bool)
-    for _ in range(n_iter):
-        # Fit only points below threshold
-        std = np.std(residual[mask]) if np.any(mask) else 1.0
-        if std < 1e-6:
-            break
-        new_mask = residual < threshold * std
-        if np.sum(new_mask) < len(y) * 0.3:  # Keep at least 30% of points
-            break
-        mask = new_mask
-        coeffs = np.polyfit(x[mask], y[mask], degree)
-        baseline = np.polyval(coeffs, x)
-        residual = y - baseline
-    
-    # Ensure baseline is not above data
-    baseline = np.minimum(baseline, y)
-    
-    return y - baseline
-
-def rolling_ball_baseline_correction(x, y, window=50):
-    """Rolling ball baseline correction"""
-    y = np.array(y, dtype=float)
-    
-    # Use minimum filter to find baseline
-    from scipy.ndimage import minimum_filter1d
-    baseline = minimum_filter1d(y, size=window, mode='nearest')
-    
-    # Smooth the baseline
-    baseline = gaussian_filter1d(baseline, sigma=window/10)
-    
-    # Ensure baseline is not above data
-    baseline = np.minimum(baseline, y)
-    
-    return y - baseline
-
-# NEW FUNCTION: Peak fitting
-def gaussian(x, amplitude, center, sigma, offset=0):
-    """Gaussian function for peak fitting"""
-    return offset + amplitude * np.exp(-(x - center)**2 / (2 * sigma**2))
-
-def lorentzian(x, amplitude, center, gamma, offset=0):
-    """Lorentzian function for peak fitting"""
-    return offset + amplitude * gamma**2 / ((x - center)**2 + gamma**2)
-
-def voigt(x, amplitude, center, sigma, gamma, offset=0):
-    """Voigt function (pseudo-Voigt) for peak fitting"""
-    # Pseudo-Voigt approximation
-    fwhm = np.sqrt(sigma**2 + gamma**2)
-    eta = 1 - sigma / fwhm if fwhm > 0 else 0.5
-    gauss_part = gaussian(x, amplitude, center, sigma, 0)
-    lorentz_part = lorentzian(x, amplitude, center, gamma, 0)
-    return offset + (1 - eta) * gauss_part + eta * lorentz_part
-
-def fit_peaks(x, y, peak_positions, model='gaussian', bounds=None):
-    """Fit multiple peaks simultaneously"""
-    x = np.array(x, dtype=float)
-    y = np.array(y, dtype=float)
-    
-    # Prepare initial parameters
-    n_peaks = len(peak_positions)
-    if n_peaks == 0:
-        return None, None
-    
-    # Initial guesses
-    p0 = []
-    lower_bounds = []
-    upper_bounds = []
-    
-    # Add offset
-    p0.append(np.min(y))
-    lower_bounds.append(-np.inf)
-    upper_bounds.append(np.inf)
-    
-    for pos in peak_positions:
-        # Find nearest data point to estimate amplitude and width
-        idx = np.argmin(np.abs(x - pos))
-        amplitude = y[idx] - np.min(y)
-        width = 5.0  # Default width
-        
-        if model == 'gaussian':
-            p0.extend([amplitude, pos, width])
-            lower_bounds.extend([0, pos - 10, 0.5])
-            upper_bounds.extend([np.inf, pos + 10, 20])
-        elif model == 'lorentzian':
-            p0.extend([amplitude, pos, width])
-            lower_bounds.extend([0, pos - 10, 0.5])
-            upper_bounds.extend([np.inf, pos + 10, 20])
-        elif model == 'voigt':
-            p0.extend([amplitude, pos, width, width/2])
-            lower_bounds.extend([0, pos - 10, 0.5, 0.1])
-            upper_bounds.extend([np.inf, pos + 10, 20, 20])
-    
-    # Define model function
-    if model == 'gaussian':
-        def model_func(x, *params):
-            offset = params[0]
-            result = np.zeros_like(x) + offset
-            for i in range(n_peaks):
-                amp = params[1 + i*3]
-                center = params[2 + i*3]
-                sigma = params[3 + i*3]
-                result += gaussian(x, amp, center, sigma, 0)
-            return result
-    elif model == 'lorentzian':
-        def model_func(x, *params):
-            offset = params[0]
-            result = np.zeros_like(x) + offset
-            for i in range(n_peaks):
-                amp = params[1 + i*3]
-                center = params[2 + i*3]
-                gamma = params[3 + i*3]
-                result += lorentzian(x, amp, center, gamma, 0)
-            return result
-    elif model == 'voigt':
-        def model_func(x, *params):
-            offset = params[0]
-            result = np.zeros_like(x) + offset
-            for i in range(n_peaks):
-                amp = params[1 + i*4]
-                center = params[2 + i*4]
-                sigma = params[3 + i*4]
-                gamma = params[4 + i*4]
-                result += voigt(x, amp, center, sigma, gamma, 0)
-            return result
-    
-    try:
-        popt, pcov = curve_fit(model_func, x, y, p0=p0, bounds=(lower_bounds, upper_bounds), maxfev=10000)
-        # Calculate R²
-        y_fit = model_func(x, *popt)
-        ss_res = np.sum((y - y_fit)**2)
-        ss_tot = np.sum((y - np.mean(y))**2)
-        r_squared = 1 - ss_res/ss_tot if ss_tot > 0 else 0
-        return popt, {'r_squared': r_squared, 'y_fit': y_fit, 'pcov': pcov}
-    except:
-        return None, None
-
-# NEW FUNCTION: Box plot for peak parameters
-def create_peak_parameter_boxplots(peaks_df, param_name='Intensity', groups=None):
-    """Create box plot for peak parameters with optional grouping"""
-    if peaks_df.empty:
-        return None
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    if groups is None:
-        # One box for all spectra
-        data = peaks_df[peaks_df['Include'] == True][param_name].values
-        ax.boxplot(data, labels=['All spectra'])
-        ax.set_ylabel(param_name, fontsize=11, fontweight='bold')
-        ax.set_title(f'{param_name} Distribution Across All Spectra', fontsize=12, fontweight='bold')
-    else:
-        # Grouped box plots
-        group_names = list(groups.keys())
-        group_data = []
-        for group_name in group_names:
-            group_spectra = groups[group_name]
-            group_vals = []
-            for spec in group_spectra:
-                spec_data = peaks_df[(peaks_df['Spectrum'] == spec) & (peaks_df['Include'] == True)]
-                if not spec_data.empty:
-                    group_vals.extend(spec_data[param_name].values)
-            group_data.append(group_vals)
-        
-        # Create box plot
-        bp = ax.boxplot(group_data, labels=group_names, patch_artist=True)
-        
-        # Color the boxes
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        for patch, color in zip(bp['boxes'], colors[:len(group_names)]):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-        
-        # Add swarm plot overlay
-        for i, data in enumerate(group_data):
-            x = np.random.normal(i+1, 0.04, size=len(data))
-            ax.scatter(x, data, alpha=0.3, s=20, color='black')
-        
-        ax.set_ylabel(param_name, fontsize=11, fontweight='bold')
-        ax.set_title(f'{param_name} Distribution by Group', fontsize=12, fontweight='bold')
-    
-    ax.tick_params(direction='in', length=5, width=1)
-    ax.grid(True, alpha=0.3, linestyle='--', axis='y')
-    plt.tight_layout()
-    return fig
-
-# NEW FUNCTION: PCA analysis
-def perform_pca(spectra_dict, ordered_spectra, n_components=2, x_range=None):
-    """Perform PCA on spectra data"""
-    # Prepare data matrix
-    data_matrix = []
-    spectrum_names = []
-    x_values = None
-    
-    for name in ordered_spectra:
-        if name in spectra_dict:
-            data = spectra_dict[name]['data']
-            x = data['x'].values
-            y = data['y'].values
-            
-            # Crop to range if specified
-            if x_range is not None and len(x_range) == 2:
-                mask = (x >= x_range[0]) & (x <= x_range[1])
-                if np.any(mask):
-                    x = x[mask]
-                    y = y[mask]
-            
-            if x_values is None:
-                x_values = x
-            elif len(x) != len(x_values):
-                # Interpolate to common grid
-                y = np.interp(x_values, x, y)
-            
-            data_matrix.append(y)
-            spectrum_names.append(name.replace('.txt', ''))
-    
-    if not data_matrix:
-        return None, None, None, None
-    
-    data_matrix = np.array(data_matrix)
-    
-    # Standardize data
-    scaler = StandardScaler()
-    data_scaled = scaler.fit_transform(data_matrix.T).T
-    
-    # Perform PCA
-    pca = PCA(n_components=min(n_components, data_scaled.shape[0], data_scaled.shape[1]))
-    pca_result = pca.fit_transform(data_scaled)
-    
-    # Calculate explained variance
-    explained_variance = pca.explained_variance_ratio_
-    cumulative_variance = np.cumsum(explained_variance)
-    
-    return pca_result, explained_variance, cumulative_variance, pca.components_
-
-# NEW FUNCTION: Perform statistical tests
-def perform_statistical_tests(peaks_df, group_mapping, param_name='Intensity'):
-    """Perform statistical tests on peak parameters across groups"""
-    if peaks_df.empty or not group_mapping:
-        return None
-    
-    # Group data
-    groups = {}
-    for group_name, spectrum_names in group_mapping.items():
-        group_values = []
-        for spec in spectrum_names:
-            spec_data = peaks_df[(peaks_df['Spectrum'] == spec) & (peaks_df['Include'] == True)]
-            if not spec_data.empty:
-                group_values.extend(spec_data[param_name].values)
-        if group_values:
-            groups[group_name] = np.array(group_values)
-    
-    if len(groups) < 2:
-        return None
-    
-    results = {}
-    
-    # Check normality for each group
-    for group_name, values in groups.items():
-        if len(values) >= 3:
-            stat, p_value = shapiro(values)
-            results[f'{group_name}_normality'] = {'statistic': stat, 'p_value': p_value, 'normal': p_value > 0.05}
-    
-    # Perform t-test if two groups
-    if len(groups) == 2:
-        group_names = list(groups.keys())
-        g1, g2 = groups[group_names[0]], groups[group_names[1]]
-        # Welch's t-test (unequal variance)
-        t_stat, p_value = ttest_ind(g1, g2, equal_var=False)
-        results['t_test'] = {'statistic': t_stat, 'p_value': p_value, 'significant': p_value < 0.05}
-        # Mann-Whitney U test (non-parametric)
-        u_stat, p_value_mw = mannwhitneyu(g1, g2, alternative='two-sided')
-        results['mann_whitney'] = {'statistic': u_stat, 'p_value': p_value_mw, 'significant': p_value_mw < 0.05}
-    
-    # Perform ANOVA if three or more groups
-    if len(groups) >= 3:
-        group_values = list(groups.values())
-        f_stat, p_value = f_oneway(*group_values)
-        results['anova'] = {'statistic': f_stat, 'p_value': p_value, 'significant': p_value < 0.05}
-    
-    return results
-
-# NEW FUNCTION: Heatmap from spectra matrix (updated with better colorbar)
+# NEW FUNCTION: Create heatmap from spectra matrix
 def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label, 
                    colorbar_label, colormap, interpolation, title, 
                    fig_width=10, fig_height=8, log_scale=False):
@@ -1916,6 +1244,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     # Use exact min and max values for color scale
     data_clean = data_matrix_transposed[np.isfinite(data_matrix_transposed)]
     if len(data_clean) > 0:
+        # Используем точные минимум и максимум для цветовой шкалы
         vmin = np.nanmin(data_matrix_transposed)
         vmax = np.nanmax(data_matrix_transposed)
     else:
@@ -1937,30 +1266,38 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label(colorbar_label, fontsize=14, fontweight='bold')
     
-    # Determine number of ticks
-    n_ticks = 6
+    # Определяем количество делений (5-7 всего, включая min и max)
+    n_ticks = 6  # 4 промежуточных + min + max = 6
     tick_positions = np.linspace(vmin, vmax, n_ticks)
     
-    # Format tick labels
+    # Форматируем значения для отображения
     if log_scale:
+        # Для логарифмической шкалы показываем значения с 2 знаками после запятой
         tick_labels = [f"{val:.2f}" for val in tick_positions]
     else:
+        # Определяем формат в зависимости от диапазона значений
         if abs(vmax - vmin) < 0.01:
+            # Очень маленький диапазон - показываем с 4 знаками
             tick_labels = [f"{val:.4f}" for val in tick_positions]
         elif abs(vmax - vmin) < 1:
+            # Маленький диапазон - показываем с 3 знаками
             tick_labels = [f"{val:.3f}" for val in tick_positions]
         elif abs(vmax - vmin) < 10:
+            # Средний диапазон - показываем с 2 знаками
             tick_labels = [f"{val:.2f}" for val in tick_positions]
         elif abs(vmax - vmin) < 1000:
+            # Большой диапазон - показываем с 1 знаком
             tick_labels = [f"{val:.1f}" for val in tick_positions]
         else:
+            # Очень большой диапазон - показываем целые числа
             tick_labels = [f"{int(val)}" for val in tick_positions]
     
+    # Устанавливаем деления на цветовой шкале
     cbar.set_ticks(tick_positions)
     cbar.set_ticklabels(tick_labels)
     cbar.ax.tick_params(labelsize=12)
     
-    # Add border around colorbar
+    # Добавляем рамку вокруг цветовой шкалы для лучшей читаемости
     cbar.ax.spines['top'].set_visible(True)
     cbar.ax.spines['bottom'].set_visible(True)
     cbar.ax.spines['left'].set_visible(True)
@@ -2001,16 +1338,19 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
 
     if x_ranges is not None and len(x_ranges) > 0:
         # Use the min of all range starts and max of all range ends
+        # This ensures we cover all specified ranges
         range_starts = [start for start, end in x_ranges]
         range_ends = [end for start, end in x_ranges]
         x_min = min(range_starts)
         x_max = max(range_ends)
         
         # Verify that there is data in these ranges for all spectra
+        # If not, fallback to data-derived range
         has_data_in_ranges = True
         for name in ordered_spectra:
             if name in spectra_dict:
                 x_vals = spectra_dict[name]['data']['x'].values
+                # Check if spectrum has any data points within the ranges
                 in_range = False
                 for start, end in x_ranges:
                     mask = (x_vals >= start) & (x_vals <= end)
@@ -2022,9 +1362,11 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
                     break
         
         if not has_data_in_ranges:
+            # Fallback to data-derived range if no data in specified ranges
             x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
             x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
     else:
+        # Use full common range
         x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
         x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
     
@@ -2042,20 +1384,25 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
         if name not in spectra_dict or name not in heatmap_params:
             continue
         
+        # Get spectrum data
         data = spectra_dict[name]['data']
         x_orig = data['x'].values
         y_orig = data['y'].values
         
+        # If x_ranges specified, create mask for ranges and crop data
         if x_ranges is not None and len(x_ranges) > 0:
+            # Create mask for all ranges combined
             mask_total = np.zeros_like(x_orig, dtype=bool)
             for start, end in x_ranges:
                 mask_range = (x_orig >= start) & (x_orig <= end)
                 mask_total = mask_total | mask_range
             
+            # Crop to ranges
             if np.any(mask_total):
                 x_cropped = x_orig[mask_total]
                 y_cropped = y_orig[mask_total]
             else:
+                # Fallback to full data if no points in ranges
                 st.warning(f"No data points found in specified ranges for {name}. Using full spectrum.")
                 x_cropped = x_orig
                 y_cropped = y_orig
@@ -2063,16 +1410,29 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
             x_cropped = x_orig
             y_cropped = y_orig
         
+        # Interpolate to common x grid
+        # If x_cropped is empty, skip this spectrum
         if len(x_cropped) == 0:
             st.warning(f"Empty data after cropping for {name}. Skipping.")
             continue
         
+        # Interpolate to common x grid
         y_interp = np.interp(common_x, x_cropped, y_cropped)
-        y_norm = normalize_spectrum(common_x, y_interp, norm_method, norm_range, x_ranges)
         
+        # Normalize spectrum (pass x_ranges for normalization method)
+        y_norm = normalize_spectrum(
+            common_x, 
+            y_interp, 
+            norm_method, 
+            norm_range,
+            x_ranges
+        )
+        
+        # Store in matrices
         spectra_matrix.append(y_interp)
         spectra_norm_matrix.append(y_norm)
         
+        # Get parameter value
         param_value = heatmap_params[name]
         y_values.append(param_value)
     
@@ -2080,51 +1440,6 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
         return None, None, None, None
     
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
-
-# NEW FUNCTION: Correlation matrix heatmap
-def create_correlation_matrix(spectra_dict, ordered_spectra, x_range=None):
-    """Create correlation matrix heatmap for all spectra"""
-    # Interpolate all spectra to common grid
-    common_x = None
-    spectra_data = {}
-    
-    for name in ordered_spectra:
-        if name in spectra_dict:
-            data = spectra_dict[name]['data']
-            x = data['x'].values
-            y = data['y'].values
-            
-            if x_range is not None and len(x_range) == 2:
-                mask = (x >= x_range[0]) & (x <= x_range[1])
-                if np.any(mask):
-                    x = x[mask]
-                    y = y[mask]
-            
-            if common_x is None:
-                common_x = x
-            elif len(x) != len(common_x):
-                # Interpolate to common grid
-                y = np.interp(common_x, x, y)
-            
-            spectra_data[name.replace('.txt', '')] = y
-    
-    if not spectra_data or len(spectra_data) < 2:
-        return None, None
-    
-    # Build correlation matrix
-    names = list(spectra_data.keys())
-    n = len(names)
-    corr_matrix = np.zeros((n, n))
-    
-    for i in range(n):
-        for j in range(n):
-            if i == j:
-                corr_matrix[i, j] = 1.0
-            else:
-                corr, _ = pearsonr(spectra_data[names[i]], spectra_data[names[j]])
-                corr_matrix[i, j] = corr if not np.isnan(corr) else 0.0
-    
-    return corr_matrix, names
 
 # Main app
 def main():
@@ -2136,6 +1451,7 @@ def main():
     logo_path = "logo.png"
     if os.path.exists(logo_path):
         logo = Image.open(logo_path)
+        # Display logo centered with text below
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.image(logo, width=250, use_container_width=False)
@@ -2146,6 +1462,7 @@ def main():
             </div>
             """, unsafe_allow_html=True)
     else:
+        # Fallback to text header if logo not found
         st.markdown("""
         <div class="custom-header">
             <h1>🔬 SpectrAnalys</h1>
@@ -2164,10 +1481,12 @@ def main():
             key="file_uploader"
         )
         
+        # NEW: Remove all spectra button
         if uploaded_files and st.session_state.get('spectra_loaded', False):
             col1, col2 = st.columns([3, 1])
             with col1:
                 if st.button("🗑️ Remove all spectra", type="secondary", use_container_width=True):
+                    # Clear all spectrum-related session state but preserve UI settings
                     st.session_state.spectra_loaded = False
                     st.session_state.cached_spectra_data = None
                     st.session_state.peak_analysis_triggered = False
@@ -2176,10 +1495,7 @@ def main():
                     st.session_state.excluded_peaks = set()
                     st.session_state.heatmap_applied = False
                     st.session_state.heatmap_params = {}
-                    st.session_state.pca_results = None
-                    st.session_state.cluster_results = None
-                    st.session_state.statistical_tests_results = None
-                    st.session_state.difference_decomposition_results = None
+                    # Clear file uploader by rerunning
                     st.rerun()
             with col2:
                 st.markdown("")
@@ -2187,6 +1503,7 @@ def main():
         if uploaded_files:
             st.success(f"✅ Loaded {len(uploaded_files)} files")
             
+            # Load data
             spectra_data = {}
             for file in uploaded_files:
                 data = load_spectrum(file)
@@ -2200,6 +1517,7 @@ def main():
                 st.markdown("---")
                 st.markdown("### 📋 Spectrum Selection")
                 
+                # Select and order spectra
                 selected_spectra = st.multiselect(
                     "Choose spectra to display",
                     options=list(spectra_data.keys()),
@@ -2207,6 +1525,7 @@ def main():
                 )
                 
                 if selected_spectra:
+                    # Order spectra
                     ordered_spectra = []
                     for name in selected_spectra:
                         ordered_spectra.append(name)
@@ -2214,8 +1533,10 @@ def main():
                     st.markdown("---")
                     st.markdown("### ⚙️ Processing Options")
                     
+                    # Common x range option
                     common_x_range = st.checkbox("Align all spectra to common x range", value=False)
                     
+                    # X-axis ranges
                     st.markdown("#### 📊 X-axis Ranges")
                     x_range_option = st.radio(
                         "Select range mode",
@@ -2234,46 +1555,15 @@ def main():
                             if x_ranges:
                                 st.info(f"📌 Selected {len(x_ranges)} ranges: {', '.join([f'{r[0]:.0f}-{r[1]:.0f}' for r in x_ranges])}")
                     
+                    # Axis labels
                     st.markdown("#### 🏷️ Axis Labels")
                     x_label = st.text_input("X-axis label", value="Raman shift (cm⁻¹)")
                     y_label = st.text_input("Y-axis label", value="Intensity (a.u.)")
                     
-                    # NEW: Advanced processing options
-                    st.markdown("#### 🔧 Advanced Processing")
-                    
-                    with st.expander("📊 Savitzky-Golay Filtering"):
-                        enable_savgol = st.checkbox("Enable Savitzky-Golay filter", value=False)
-                        savgol_window = 11
-                        savgol_order = 3
-                        if enable_savgol:
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                savgol_window = st.slider("Window length (odd)", min_value=5, max_value=21, value=11, step=2, key="savgol_window")
-                            with col2:
-                                savgol_order = st.slider("Polynomial order", min_value=2, max_value=5, value=3, step=1, key="savgol_order")
-                                if savgol_order >= savgol_window:
-                                    st.warning("Order must be less than window length")
-                        else:
-                            savgol_window = None
-                            savgol_order = None
-                    
-                    with st.expander("📐 Baseline Correction"):
-                        baseline_method = st.selectbox("Baseline correction method", ["None", "ALS", "Polynomial", "Rolling ball"], key="baseline_method")
-                        baseline_params = {}
-                        if baseline_method == "ALS":
-                            lam = st.slider("Lambda (smoothness)", min_value=1e3, max_value=1e7, value=1e5, step=1e3, format="%.0e", key="als_lambda")
-                            p = st.slider("p (asymmetry)", min_value=0.001, max_value=0.1, value=0.01, step=0.001, format="%.3f", key="als_p")
-                            baseline_params = {'lambda': lam, 'p': p}
-                        elif baseline_method == "Polynomial":
-                            degree = st.slider("Polynomial degree", min_value=1, max_value=6, value=3, key="poly_degree")
-                            baseline_params = {'degree': degree}
-                        elif baseline_method == "Rolling ball":
-                            window = st.slider("Window size", min_value=10, max_value=200, value=50, step=5, key="roll_window")
-                            baseline_params = {'window': window}
-                    
-                    # Normalization options
+                    # Normalization options - Area removed
                     st.markdown("#### 📐 Normalization")
                     
+                    # Build normalization options based on x_range_option
                     if x_range_option == "Custom ranges (multiple)":
                         norm_options = ["Maximum intensity", "Peak intensity (range)", "Maximum rest intensity"]
                     else:
@@ -2298,6 +1588,7 @@ def main():
                             except:
                                 st.warning("Invalid range format")
                     
+                    # Offset options
                     st.markdown("#### 📈 Offset Settings")
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2319,8 +1610,10 @@ def main():
                             key="norm_offset_step"
                         )
                     
+                    # Fill area option
                     fill_area = st.checkbox("Fill area under normalized spectra", value=False)
                     
+                    # NEW: Fill transparency slider (replaces fill_type)
                     fill_alpha = 0.3
                     if fill_area:
                         fill_alpha = st.slider(
@@ -2332,8 +1625,10 @@ def main():
                             help="0.2 = more transparent, 0.9 = more opaque"
                         )
                     
+                    # NEW: Subtract minimum intensity checkbox
                     subtract_min_intensity = st.checkbox("Subtract minimum intensity (start from zero)", value=False)
                     
+                    # NEW: Plot settings (Grid and Linewidth)
                     st.markdown("#### 🎨 Plot Settings")
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2347,6 +1642,7 @@ def main():
                             step=0.1
                         )
                     
+                    # NEW: Figure size selector for individual plots
                     st.markdown("#### 📐 Plot Size (Width × Height)")
                     fig_size_options = {
                         "3×3": (3, 3),
@@ -2363,6 +1659,7 @@ def main():
                     )
                     fig_width, fig_height = fig_size_options[selected_size]
 
+                    # Legend settings
                     st.markdown("#### 🏷️ Legend Settings")
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2382,6 +1679,7 @@ def main():
                             key="legend_position"
                         )
                     
+                    # Legend size (width adjustment)
                     legend_offset = st.slider(
                         "Legend offset from plot (0.5-2.0)",
                         min_value=0.5,
@@ -2423,11 +1721,12 @@ def main():
                         
                         param_label = st.text_input("Parameter label", value="Sample number")
                     
-                    # Heatmap Parameters Section
+                    # NEW: Heatmap Parameters Section
                     st.markdown("---")
                     st.markdown("### 📊 Heatmap Parameters")
                     st.markdown("*Assign numeric values (temperature, concentration, etc.) to each spectrum for heatmap visualization*")
                     
+                    # Parameter type selection
                     heatmap_param_type = st.selectbox(
                         "Parameter type",
                         options=["Temperature (°C)", "Concentration (x)", "Custom"],
@@ -2435,6 +1734,7 @@ def main():
                         key="heatmap_param_type_select"
                     )
                     
+                    # Custom label if Custom is selected
                     heatmap_custom_label = ""
                     if heatmap_param_type == "Custom":
                         heatmap_custom_label = st.text_input(
@@ -2443,6 +1743,7 @@ def main():
                             key="heatmap_custom_label"
                         )
                     
+                    # Determine the label for the heatmap y-axis
                     if heatmap_param_type == "Temperature (°C)":
                         heatmap_y_label = "Temperature (°C)"
                     elif heatmap_param_type == "Concentration (x)":
@@ -2450,11 +1751,14 @@ def main():
                     else:
                         heatmap_y_label = heatmap_custom_label if heatmap_custom_label else "Parameter"
                     
+                    # Create input fields for each spectrum
                     st.markdown("#### Assign values to spectra:")
                     
+                    # Use a container with no rerun on change
                     heatmap_params_temp = {}
                     for name in ordered_spectra:
                         display_name = name.replace('.txt', '')
+                        # Use a unique key for each input
                         param_key = f"heatmap_{name}"
                         heatmap_params_temp[name] = st.number_input(
                             f"{display_name}",
@@ -2464,10 +1768,12 @@ def main():
                             key=param_key
                         )
                     
+                    # Heatmap visualization settings
                     st.markdown("#### 🎨 Heatmap Settings")
                     
                     col1, col2 = st.columns(2)
                     with col1:
+                        # Interpolation methods
                         interpolation_options = {
                             'none': 'None (discrete)',
                             'bilinear': 'Bilinear (smooth)',
@@ -2481,11 +1787,12 @@ def main():
                             "Interpolation method",
                             options=list(interpolation_options.keys()),
                             format_func=lambda x: interpolation_options[x],
-                            index=5,
+                            index=5,  # Default to 'gaussian'
                             key="heatmap_interpolation_select"
                         )
                     
                     with col2:
+                        # Colormap selection - 10 options
                         colormap_options = {
                             'viridis': 'Viridis (perceptual)',
                             'plasma': 'Plasma (perceptual)',
@@ -2506,6 +1813,7 @@ def main():
                             key="heatmap_colormap_select"
                         )
                     
+                    # Apply button for heatmaps
                     apply_heatmap = st.button(
                         "🔄 Apply for heatmaps",
                         use_container_width=True,
@@ -2513,6 +1821,7 @@ def main():
                     )
                     
                     if apply_heatmap:
+                        # Store heatmap parameters in session state
                         st.session_state.heatmap_params = heatmap_params_temp
                         st.session_state.heatmap_param_type = heatmap_param_type
                         st.session_state.heatmap_interpolation = heatmap_interpolation
@@ -2520,8 +1829,9 @@ def main():
                         st.session_state.heatmap_y_label = heatmap_y_label
                         st.session_state.heatmap_applied = True
                         st.session_state.heatmap_ordered_names = ordered_spectra
-                        st.session_state.heatmap_x_ranges = x_ranges
+                        st.session_state.heatmap_x_ranges = x_ranges  # <-- СОХРАНЯЕМ x_ranges в session_state
                         
+                        # Prepare heatmap data
                         spectra_matrix, spectra_norm_matrix, x_grid, y_values = prepare_heatmap_data(
                             spectra_data, ordered_spectra, heatmap_params_temp, 
                             norm_method, norm_range, x_ranges
@@ -2537,10 +1847,11 @@ def main():
                             st.error("❌ Failed to prepare heatmap data. Check that all spectra are valid.")
                             st.session_state.heatmap_applied = False
                     
-                    # Color Assignment
+                    # Color Assignment moved to the bottom
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
                     
+                    # Define default color palette
                     default_colors = [
                         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
@@ -2560,9 +1871,11 @@ def main():
                                 key=f"color_{name}"
                             )
                     
+                    # Update spectra data with colors
                     for name in ordered_spectra:
                         spectra_data[name]['color'] = colors[name]
                     
+                    # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
                     st.session_state.cached_spectra_data = {
                         'spectra_data': spectra_data,
@@ -2590,30 +1903,28 @@ def main():
                         'legend_fontsize': legend_fontsize,
                         'legend_position': legend_position,
                         'legend_offset': legend_offset,
+                        # NEW: Heatmap settings
                         'heatmap_params': st.session_state.heatmap_params,
                         'heatmap_param_type': st.session_state.heatmap_param_type,
                         'heatmap_interpolation': st.session_state.heatmap_interpolation,
                         'heatmap_colormap': st.session_state.heatmap_colormap,
                         'heatmap_y_label': st.session_state.heatmap_y_label,
-                        'heatmap_applied': st.session_state.heatmap_applied,
-                        # NEW: Advanced processing settings
-                        'savgol_window': savgol_window if enable_savgol else None,
-                        'savgol_order': savgol_order if enable_savgol else None,
-                        'baseline_method': baseline_method if baseline_method != "None" else None,
-                        'baseline_params': baseline_params if baseline_method != "None" else None
+                        'heatmap_applied': st.session_state.heatmap_applied
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # Sidebar footer with info
         st.markdown("---")
         st.markdown("""
         <div style="text-align: center; font-size: 0.8rem; color: #666;">
-            <p>🔬 SpectrAnalys v3.0<br>Scientific Spectroscopic Analysis</p>
+            <p>🔬 SpectrAnalys v2.0<br>Scientific Spectroscopic Analysis</p>
         </div>
         """, unsafe_allow_html=True)
     
     # Main content area
     if uploaded_files and st.session_state.get('spectra_loaded', False) and st.session_state.cached_spectra_data:
+        # Load cached data
         cached = st.session_state.cached_spectra_data
         spectra_data = cached['spectra_data']
         ordered_spectra = cached['ordered_spectra']
@@ -2637,11 +1948,8 @@ def main():
         param_correlation = cached['param_correlation']
         param_values = cached['param_values']
         param_label = cached['param_label']
-        savgol_window = cached.get('savgol_window', None)
-        savgol_order = cached.get('savgol_order', None)
-        baseline_method = cached.get('baseline_method', None)
-        baseline_params = cached.get('baseline_params', None)
         
+        # Display metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"""
@@ -2682,21 +1990,20 @@ def main():
         
         st.markdown("---")
         
+        # Apply common x range if selected
         current_spectra = spectra_data
         if common_x_range:
             current_spectra = align_x_ranges(current_spectra)
         
+        # Filter spectra based on selection
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
         
-        # UPDATED Tabs: Added Statistical Analysis, Multivariate Analysis, Documentation
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        # Create tabs for different analysis views - NEW: Added comparison tab
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Combined Spectra Visualization",
             "🔍 Advanced Peak Analysis", 
             "📈 Parameter Correlation",
-            "🔀 Compare Two Spectra",
-            "📐 Statistical Analysis",
-            "🧮 Multivariate Analysis",
-            "📚 Documentation"
+            "🔀 Compare Two Spectra"
         ])
         
         with tab1:
@@ -2704,15 +2011,7 @@ def main():
             st.subheader("Comprehensive Spectra Analysis")
             st.markdown("*All visualization modes combined for comprehensive spectral comparison*")
             
-            # Display processing status
-            if savgol_window is not None or baseline_method is not None:
-                processing_info = []
-                if savgol_window is not None:
-                    processing_info.append(f"Savitzky-Golay (window={savgol_window}, order={savgol_order})")
-                if baseline_method is not None:
-                    processing_info.append(f"Baseline: {baseline_method}")
-                st.info(f"🔧 Advanced processing active: {', '.join(processing_info)}")
-            
+            # Prepare normalized spectra for individual plots
             normalized_spectra = {}
             for name, spec in filtered_spectra.items():
                 data = spec['data']
@@ -2721,13 +2020,14 @@ def main():
                     data['y'].values,
                     norm_method,
                     norm_range,
-                    x_ranges
+                    x_ranges  # Pass x_ranges for "Maximum rest intensity" method
                 )
                 normalized_spectra[name] = {
                     'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
                     'color': spec['color']
                 }
             
+            # Apply subtract minimum intensity if requested
             if subtract_min_intensity:
                 for name in normalized_spectra:
                     y_vals = normalized_spectra[name]['data']['y'].values
@@ -2737,6 +2037,7 @@ def main():
                     else:
                         normalized_spectra[name]['data']['y'] = y_vals
             
+            # Define the four visualization configurations (titles removed)
             viz_configs = [
                 (filtered_spectra, 0, False, False, False, y_label),
                 (normalized_spectra, 0, False, True, False, f"Normalized {y_label}"),
@@ -2744,6 +2045,7 @@ def main():
                 (normalized_spectra, norm_offset_step, fill_area, True, True, f"Normalized {y_label}")
             ]
             
+            # Create and display individual plots
             for idx, (spectra, offset_step, fill, normalized, use_offset, yl) in enumerate(viz_configs):
                 fig = create_individual_plot(
                     spectra, x_label, yl, "",
@@ -2752,14 +2054,11 @@ def main():
                     show_grid, line_width, fig_width, fig_height,
                     legend_fontsize=cached['legend_fontsize'],
                     legend_position=cached['legend_position'],
-                    legend_offset=cached['legend_offset'],
-                    savgol_filter_window=savgol_window,
-                    savgol_filter_order=savgol_order,
-                    baseline_method=baseline_method,
-                    baseline_params=baseline_params
+                    legend_offset=cached['legend_offset']
                 )
                 st.pyplot(fig)
                 
+                # Download button for individual plot
                 buf = BytesIO()
                 fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
                 buf.seek(0)
@@ -2778,15 +2077,17 @@ def main():
                 """, unsafe_allow_html=True)
                 plt.close()
                 
+                # Add separator between plots
                 if idx < len(viz_configs) - 1:
                     st.markdown('<div class="separator">****</div>', unsafe_allow_html=True)
             
-            # Heatmap plots section
+            # NEW: Heatmap plots section (appears only if heatmap is applied)
             if st.session_state.get('heatmap_applied', False):
                 st.markdown('<div class="separator">═══════════════════════════════════════════════════</div>', unsafe_allow_html=True)
                 st.subheader("🔥 Heatmap Visualization")
                 st.markdown("*Spectral evolution heatmaps showing intensity distribution as function of parameter*")
                 
+                # Get heatmap data from session state
                 spectra_matrix = st.session_state.get('heatmap_spectra_matrix')
                 spectra_norm_matrix = st.session_state.get('heatmap_spectra_norm_matrix')
                 x_grid = st.session_state.get('heatmap_x_grid')
@@ -2794,12 +2095,16 @@ def main():
                 heatmap_y_label = st.session_state.get('heatmap_y_label', 'Parameter')
                 heatmap_interpolation = st.session_state.get('heatmap_interpolation', 'gaussian')
                 heatmap_colormap = st.session_state.get('heatmap_colormap', 'viridis')
+                heatmap_x_ranges = st.session_state.get('heatmap_x_ranges', None)
                 
                 if spectra_matrix is not None and x_grid is not None and y_values is not None:
+                    # Determine if we should use log scale
+                    # Use log scale if intensity values span more than 2 orders of magnitude
                     min_val = np.min(spectra_matrix[spectra_matrix > 0]) if np.any(spectra_matrix > 0) else 1
                     max_val = np.max(spectra_matrix)
                     use_log = (max_val / min_val) > 100 if min_val > 0 else False
                     
+                    # Create heatmap for raw intensity
                     fig_heatmap = create_heatmap(
                         spectra_matrix, x_grid, y_values,
                         x_label, heatmap_y_label,
@@ -2811,6 +2116,7 @@ def main():
                     )
                     st.pyplot(fig_heatmap)
                     
+                    # Download button for heatmap
                     buf = BytesIO()
                     fig_heatmap.savefig(buf, format='png', dpi=600, bbox_inches='tight')
                     buf.seek(0)
@@ -2828,6 +2134,7 @@ def main():
                     """, unsafe_allow_html=True)
                     plt.close(fig_heatmap)
                     
+                    # Create heatmap for normalized intensity
                     fig_heatmap_norm = create_heatmap(
                         spectra_norm_matrix, x_grid, y_values,
                         x_label, heatmap_y_label,
@@ -2839,6 +2146,7 @@ def main():
                     )
                     st.pyplot(fig_heatmap_norm)
                     
+                    # Download button for normalized heatmap
                     buf = BytesIO()
                     fig_heatmap_norm.savefig(buf, format='png', dpi=600, bbox_inches='tight')
                     buf.seek(0)
@@ -2856,15 +2164,20 @@ def main():
                     """, unsafe_allow_html=True)
                     plt.close(fig_heatmap_norm)
                     
+                    # Show parameter values used
+                    st.markdown("#### 📊 Heatmap Parameters Used:")
                     param_df = pd.DataFrame({
                         'Spectrum': [name.replace('.txt', '') for name in st.session_state.heatmap_ordered_names if name in st.session_state.heatmap_params],
                         heatmap_y_label: [st.session_state.heatmap_params[name] for name in st.session_state.heatmap_ordered_names if name in st.session_state.heatmap_params]
                     })
                     st.dataframe(param_df, use_container_width=True)
+                    
+                    # Add interpolation and colormap info
                     st.caption(f"Interpolation: {heatmap_interpolation} | Colormap: {heatmap_colormap} | Log scale: {'Yes' if use_log else 'No'} for intensity, Yes for normalized")
                 else:
                     st.warning("⚠️ Heatmap data not available. Please click 'Apply for heatmaps' in the sidebar.")
             else:
+                # Show hint for heatmap
                 st.info("💡 To generate heatmaps, assign numeric values to spectra in the sidebar and click 'Apply for heatmaps'.")
             
             st.markdown('</div>', unsafe_allow_html=True)
@@ -2875,15 +2188,18 @@ def main():
             st.markdown("*Select spectral range manually for precise peak analysis*")
             
             if analyze_peaks_flag and filtered_spectra:
+                # Display full spectra for range selection
                 st.markdown("#### 📊 Select Analysis Range")
                 st.markdown("Use the sliders below to select left and right boundaries for peak analysis")
                 
+                # Get global x range
                 all_x = []
                 for spec in filtered_spectra.values():
                     all_x.extend(spec['data']['x'].values)
                 global_min_x = float(np.min(all_x))
                 global_max_x = float(np.max(all_x))
                 
+                # Create range sliders
                 col1, col2 = st.columns(2)
                 with col1:
                     left_boundary = st.slider(
@@ -2904,12 +2220,14 @@ def main():
                         key="right_boundary"
                     )
                 
+                # Ensure left < right
                 if left_boundary >= right_boundary:
                     st.warning("⚠️ Left boundary must be less than right boundary")
                     manual_range = (None, None)
                 else:
                     manual_range = (left_boundary, right_boundary)
                 
+                # Display full spectra with range boundaries
                 fig_range, ax_range = plt.subplots(figsize=(12, 5))
                 for name, spec in filtered_spectra.items():
                     data = spec['data']
@@ -2917,9 +2235,11 @@ def main():
                                  color=spec['color'], linewidth=1.5, 
                                  label=name.replace('.txt', ''), alpha=0.7)
                 
+                # Add range boundaries
                 if left_boundary < right_boundary:
                     ax_range.axvline(left_boundary, color='red', linestyle='-', linewidth=2, alpha=0.7, label=f'Left: {left_boundary:.1f}')
                     ax_range.axvline(right_boundary, color='blue', linestyle='-', linewidth=2, alpha=0.7, label=f'Right: {right_boundary:.1f}')
+                    # Highlight selected range
                     ax_range.axvspan(left_boundary, right_boundary, alpha=0.2, color='gray')
                 
                 ax_range.set_xlabel(x_label, fontsize=11, fontweight='bold')
@@ -2932,6 +2252,7 @@ def main():
                 st.pyplot(fig_range)
                 plt.close()
                 
+                # Run analysis button
                 if st.button("🚀 Analyze", key="run_peak_analysis"):
                     if left_boundary < right_boundary:
                         with st.spinner("Analyzing peaks..."):
@@ -2948,6 +2269,7 @@ def main():
                     else:
                         st.error("Please select a valid range (left < right)")
                 
+                # Display results if analysis has been run
                 if st.session_state.peak_analysis_triggered and st.session_state.peak_analysis_results is not None:
                     peaks_df = st.session_state.peak_analysis_results.copy()
                     
@@ -2956,6 +2278,7 @@ def main():
                         st.subheader("📊 Peak Analysis Results")
                         st.markdown("*Check/Uncheck peaks to include/exclude them from visualization and correlation analysis*")
                         
+                        # Display peak statistics
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             st.metric("Total Peaks Detected", len(peaks_df))
@@ -2968,8 +2291,11 @@ def main():
                         
                         st.markdown("---")
                         
+                        # Create editable dataframe with checkboxes
+                        # Generate unique IDs for each row
                         peaks_df['temp_id'] = range(len(peaks_df))
                         
+                        # Display dataframe with checkboxes using st.data_editor
                         edited_df = st.data_editor(
                             peaks_df[['Spectrum', 'Peak position', 'Intensity', 'Area', 'FWHM', 'Include', 'temp_id']],
                             column_config={
@@ -2978,7 +2304,7 @@ def main():
                                     help="Check to include this peak in analysis",
                                     default=True
                                 ),
-                                'temp_id': None
+                                'temp_id': None  # Hide the temp_id column
                             },
                             disabled=['Spectrum', 'Peak position', 'Intensity', 'Area', 'FWHM'],
                             hide_index=True,
@@ -2986,14 +2312,19 @@ def main():
                             key="peak_editor"
                         )
                         
+                        # Update the Include column based on user edits
                         if edited_df is not None:
+                            # Create a mapping from temp_id to new Include value
                             include_map = dict(zip(edited_df['temp_id'], edited_df['Include']))
+                            # Update peaks_df
                             peaks_df['Include'] = peaks_df['temp_id'].map(include_map)
+                            # Store updated dataframe in session state
                             st.session_state.peak_analysis_results = peaks_df.drop('temp_id', axis=1)
                             peaks_df = peaks_df.drop('temp_id', axis=1)
                         else:
                             peaks_df = peaks_df.drop('temp_id', axis=1)
                         
+                        # Download button for peak analysis (with current include/exclude status)
                         csv = peaks_df.to_csv(index=False)
                         st.download_button(
                             label="📥 Download peak analysis as CSV",
@@ -3002,103 +2333,7 @@ def main():
                             mime="text/csv"
                         )
                         
-                        # NEW: Box plot visualization for peak parameters
-                        st.markdown("---")
-                        st.subheader("📊 Peak Parameter Distribution")
-                        st.markdown("*Visualize distribution of peak parameters across spectra*")
-                        
-                        param_to_plot = st.selectbox(
-                            "Select parameter to visualize",
-                            options=['Intensity', 'Area', 'FWHM', 'Peak position'],
-                            index=0,
-                            key="boxplot_param"
-                        )
-                        
-                        # Option to group spectra
-                        group_by_spectra = st.checkbox("Group by spectrum", value=True)
-                        
-                        if group_by_spectra:
-                            # Create box plot per spectrum
-                            fig_box = create_peak_parameter_boxplots(peaks_df, param_to_plot)
-                            if fig_box is not None:
-                                st.pyplot(fig_box)
-                                plt.close(fig_box)
-                            else:
-                                st.info("Not enough data for box plot")
-                        else:
-                            # Allow manual grouping
-                            st.info("Manual grouping not implemented in this version")
-                        
-                        # NEW: Statistical tests on peak parameters
-                        st.markdown("---")
-                        st.subheader("📐 Statistical Tests on Peak Parameters")
-                        st.markdown("*Compare peak parameters between groups*")
-                        
-                        if len(peaks_df) > 0:
-                            # Create groups based on spectra
-                            all_spectra = peaks_df['Spectrum'].unique()
-                            if len(all_spectra) >= 2:
-                                st.info(f"Available spectra: {', '.join(all_spectra)}")
-                                
-                                # Let user create groups
-                                st.markdown("#### Define Groups for Comparison")
-                                group1 = st.multiselect(
-                                    "Group 1 spectra",
-                                    options=all_spectra,
-                                    default=all_spectra[:len(all_spectra)//2] if len(all_spectra) > 1 else [],
-                                    key="stat_group1"
-                                )
-                                group2 = st.multiselect(
-                                    "Group 2 spectra",
-                                    options=all_spectra,
-                                    default=all_spectra[len(all_spectra)//2:] if len(all_spectra) > 1 else [],
-                                    key="stat_group2"
-                                )
-                                
-                                if group1 and group2:
-                                    group_mapping = {'Group 1': group1, 'Group 2': group2}
-                                    test_param = st.selectbox(
-                                        "Parameter for statistical test",
-                                        options=['Intensity', 'Area', 'FWHM', 'Peak position'],
-                                        index=0,
-                                        key="stat_param"
-                                    )
-                                    
-                                    if st.button("Run Statistical Tests", key="run_stat_tests"):
-                                        results = perform_statistical_tests(peaks_df, group_mapping, test_param)
-                                        if results:
-                                            st.session_state.statistical_tests_results = results
-                                            
-                                            # Display results
-                                            st.markdown("#### Statistical Test Results")
-                                            for test_name, test_results in results.items():
-                                                if 'normality' in test_name:
-                                                    st.write(f"**{test_name}**")
-                                                    st.write(f"  Shapiro-Wilk statistic: {test_results['statistic']:.4f}")
-                                                    st.write(f"  p-value: {test_results['p_value']:.4f}")
-                                                    st.write(f"  Normal distribution: {'✅ Yes' if test_results['normal'] else '❌ No'}")
-                                                elif 't_test' in test_name:
-                                                    st.write(f"**Welch's t-test**")
-                                                    st.write(f"  t-statistic: {test_results['statistic']:.4f}")
-                                                    st.write(f"  p-value: {test_results['p_value']:.4f}")
-                                                    st.write(f"  Significant difference: {'✅ Yes' if test_results['significant'] else '❌ No'}")
-                                                elif 'mann_whitney' in test_name:
-                                                    st.write(f"**Mann-Whitney U test**")
-                                                    st.write(f"  U-statistic: {test_results['statistic']:.4f}")
-                                                    st.write(f"  p-value: {test_results['p_value']:.4f}")
-                                                    st.write(f"  Significant difference: {'✅ Yes' if test_results['significant'] else '❌ No'}")
-                                                elif 'anova' in test_name:
-                                                    st.write(f"**ANOVA**")
-                                                    st.write(f"  F-statistic: {test_results['statistic']:.4f}")
-                                                    st.write(f"  p-value: {test_results['p_value']:.4f}")
-                                                    st.write(f"  Significant difference: {'✅ Yes' if test_results['significant'] else '❌ No'}")
-                                        else:
-                                            st.warning("Could not perform statistical tests. Check group assignments.")
-                                else:
-                                    st.info("Select spectra for both groups to run statistical tests")
-                            else:
-                                st.info("Need at least 2 spectra for statistical comparison")
-                        
+                        # Visualize peaks with selected range (only included peaks)
                         st.markdown("---")
                         st.subheader("🔍 Peak Visualization")
                         st.markdown("*Only checked peaks are shown*")
@@ -3109,6 +2344,7 @@ def main():
                         )
                         st.pyplot(fig_peaks)
                         
+                        # Download peak visualization
                         buf = BytesIO()
                         fig_peaks.savefig(buf, format='png', dpi=300, bbox_inches='tight')
                         buf.seek(0)
@@ -3126,6 +2362,7 @@ def main():
                         """, unsafe_allow_html=True)
                         plt.close()
                         
+                        # Store for correlation tab
                         st.session_state.correlation_ready = True
                         st.session_state.correlation_peaks_df = peaks_df
                     else:
@@ -3142,11 +2379,13 @@ def main():
             if param_correlation and param_values and st.session_state.get('correlation_ready', False) and st.session_state.get('correlation_peaks_df') is not None:
                 peaks_df = st.session_state.correlation_peaks_df
                 
+                # Filter to only include peaks marked as Include=True
                 peaks_df = peaks_df[peaks_df['Include'] == True]
                 
                 if peaks_df.empty:
                     st.warning("⚠️ No peaks are currently included. Please check at least one peak in the Peak Analysis tab.")
                 else:
+                    # Prepare data for correlation
                     param_list = []
                     intensity_list = []
                     area_list = []
@@ -3157,6 +2396,7 @@ def main():
                         if name in param_values:
                             spec_peaks = peaks_df[peaks_df['Spectrum'] == name.replace('.txt', '')]
                             if not spec_peaks.empty:
+                                # Take the most intense peak from included peaks
                                 main_peak = spec_peaks.loc[spec_peaks['Intensity'].idxmax()]
                                 param_list.append(param_values[name])
                                 intensity_list.append(main_peak['Intensity'])
@@ -3165,11 +2405,13 @@ def main():
                                 fwhm_list.append(main_peak['FWHM'])
                     
                     if param_list:
+                        # Calculate correlation coefficients
                         corr_intensity = pearsonr(param_list, intensity_list)[0] if len(param_list) > 2 else 0
                         corr_area = pearsonr(param_list, area_list)[0] if len(param_list) > 2 else 0
                         corr_position = pearsonr(param_list, position_list)[0] if len(param_list) > 2 else 0
                         corr_fwhm = pearsonr(param_list, fwhm_list)[0] if len(param_list) > 2 else 0
                         
+                        # Display correlation metrics
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             st.metric("Intensity Correlation", f"{corr_intensity:.3f}", 
@@ -3186,26 +2428,31 @@ def main():
                         
                         st.markdown("---")
                         
+                        # Create correlation plots (4 plots: Intensity, Area, Position, FWHM)
                         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
                         
+                        # Intensity plot
                         axes[0, 0].scatter(param_list, intensity_list, c='#1f77b4', alpha=0.6, s=80, edgecolors='white', linewidth=2)
                         axes[0, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
                         axes[0, 0].set_ylabel("Peak Intensity (a.u.)", fontsize=11, fontweight='bold')
                         axes[0, 0].set_title(f"Intensity vs {param_label}\n(r = {corr_intensity:.3f})", fontsize=12, fontweight='bold')
                         axes[0, 0].grid(True, alpha=0.3, linestyle='--')
                         
+                        # Area plot
                         axes[0, 1].scatter(param_list, area_list, c='#2ca02c', alpha=0.6, s=80, edgecolors='white', linewidth=2)
                         axes[0, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
                         axes[0, 1].set_ylabel("Peak Area", fontsize=11, fontweight='bold')
                         axes[0, 1].set_title(f"Area vs {param_label}\n(r = {corr_area:.3f})", fontsize=12, fontweight='bold')
                         axes[0, 1].grid(True, alpha=0.3, linestyle='--')
                         
+                        # Position plot
                         axes[1, 0].scatter(param_list, position_list, c='#d62728', alpha=0.6, s=80, edgecolors='white', linewidth=2)
                         axes[1, 0].set_xlabel(param_label, fontsize=11, fontweight='bold')
                         axes[1, 0].set_ylabel("Peak Position (cm⁻¹)", fontsize=11, fontweight='bold')
                         axes[1, 0].set_title(f"Position vs {param_label}\n(r = {corr_position:.3f})", fontsize=12, fontweight='bold')
                         axes[1, 0].grid(True, alpha=0.3, linestyle='--')
                         
+                        # FWHM plot
                         axes[1, 1].scatter(param_list, fwhm_list, c='#9467bd', alpha=0.6, s=80, edgecolors='white', linewidth=2)
                         axes[1, 1].set_xlabel(param_label, fontsize=11, fontweight='bold')
                         axes[1, 1].set_ylabel("FWHM (cm⁻¹)", fontsize=11, fontweight='bold')
@@ -3216,6 +2463,7 @@ def main():
                         st.pyplot(fig)
                         plt.close()
                         
+                        # Show correlation table
                         st.markdown("---")
                         st.subheader("Correlation Data Table")
                         corr_data = pd.DataFrame({
@@ -3228,6 +2476,7 @@ def main():
                         })
                         st.dataframe(corr_data, use_container_width=True)
                         
+                        # Download button
                         csv = corr_data.to_csv(index=False)
                         st.download_button(
                             label="📥 Download correlation data as CSV",
@@ -3245,13 +2494,14 @@ def main():
                 st.info("📊 Enable parameter correlation in the sidebar and assign numeric values to spectra for correlation analysis")
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # UPDATED Tab 4: Compare Two Spectra with Decomposition
+        # NEW TAB: Compare Two Spectra
         with tab4:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("🔀 Spectral Difference Analysis")
-            st.markdown("*Compare two spectra to identify differences and understand their nature (scaling, shift, broadening)*")
+            st.markdown("*Compare two spectra to identify differences and visualize them with heatmaps*")
             
             if len(ordered_spectra) >= 2:
+                # Select two spectra for comparison
                 col1, col2 = st.columns(2)
                 with col1:
                     spectrum_a_name = st.selectbox(
@@ -3268,19 +2518,17 @@ def main():
                         key="sample_spectrum"
                     )
                 
-                # NEW: Difference analysis mode
-                analysis_mode = st.radio(
-                    "Analysis Mode",
-                    ["Standard Difference", "Difference Decomposition (Scaling, Shift, Broadening)"],
-                    index=0,
-                    key="diff_mode"
-                )
+                # Option to swap difference direction
+                swap_direction = st.checkbox("Swap difference direction (Sample - Reference)", value=True)
                 
                 st.markdown("---")
+                
+                # Difference analysis settings
                 st.markdown("#### 🎨 Difference Plot Settings")
                 
                 col1, col2 = st.columns(2)
                 with col1:
+                    # Colormap selection (10 palettes)
                     colormap_options = {
                         'RdBu_r': 'Red-Blue (diverging)',
                         'coolwarm': 'Cool-Warm (diverging)',
@@ -3297,12 +2545,12 @@ def main():
                         "Color palette for difference heatmap",
                         options=list(colormap_options.keys()),
                         format_func=lambda x: colormap_options[x],
-                        index=0,
-                        key="diff_colormap"
+                        index=0
                     )
                 
                 with col2:
-                    smooth_difference = st.checkbox("Apply smoothing to difference profile", value=False, key="diff_smooth")
+                    # Smoothing option
+                    smooth_difference = st.checkbox("Apply smoothing to difference profile", value=False)
                     smooth_sigma = 1.0
                     if smooth_difference:
                         smooth_sigma = st.slider(
@@ -3311,26 +2559,29 @@ def main():
                             max_value=5.0,
                             value=1.5,
                             step=0.5,
-                            key="diff_sigma"
+                            help="Higher values produce smoother difference profiles"
                         )
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    symmetric_scale = st.checkbox("Symmetric color scale (centered at zero)", value=True, key="diff_sym")
+                    # Symmetric color scale
+                    symmetric_scale = st.checkbox("Symmetric color scale (centered at zero)", value=True)
                 
                 with col2:
+                    # Significance threshold
                     difference_threshold = st.number_input(
-                        "Significance threshold",
+                        "Significance threshold (highlight regions with |difference| > threshold)",
                         min_value=0.0,
                         max_value=1.0,
                         value=0.1,
                         step=0.01,
                         format="%.3f",
-                        key="diff_threshold"
+                        help="Regions with absolute difference exceeding this value will be highlighted"
                     )
                 
                 st.markdown("---")
                 
+                # Get the selected spectra data
                 if spectrum_a_name and spectrum_b_name:
                     spectrum_a = filtered_spectra[spectrum_a_name]
                     spectrum_b = filtered_spectra[spectrum_b_name]
@@ -3338,92 +2589,38 @@ def main():
                     name_a = spectrum_a_name.replace('.txt', '')
                     name_b = spectrum_b_name.replace('.txt', '')
                     
+                    # Create comparison plot
                     with st.spinner("Generating comparison plot..."):
-                        if analysis_mode == "Standard Difference":
-                            fig, (mean_diff, max_abs_diff, rms_diff, correlation) = create_comparison_plot(
-                                spectrum_a, spectrum_b, name_a, name_b,
-                                x_label, y_label, norm_method, norm_range,
-                                norm_offset_step, fill_area, fill_alpha, subtract_min_intensity,
-                                show_grid, line_width, fig_width, fig_height,
-                                cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
-                                selected_colormap, smooth_difference, smooth_sigma,
-                                symmetric_scale, difference_threshold
-                            )
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("Mean Difference", f"{mean_diff:.4f}")
-                            with col2:
-                                st.metric("Max |Difference|", f"{max_abs_diff:.4f}")
-                            with col3:
-                                st.metric("RMS Difference", f"{rms_diff:.4f}")
-                            with col4:
-                                st.metric("Spectral Correlation", f"{correlation:.4f}", 
-                                         delta="strong" if abs(correlation) > 0.7 else "weak")
-                        else:
-                            # NEW: Difference Decomposition mode
-                            fig, decomp_results = create_comparison_plot_with_decomposition(
-                                spectrum_a, spectrum_b, name_a, name_b,
-                                x_label, y_label, norm_method, norm_range,
-                                norm_offset_step, fill_area, fill_alpha, subtract_min_intensity,
-                                show_grid, line_width, fig_width, fig_height,
-                                cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
-                                selected_colormap, smooth_difference, smooth_sigma,
-                                symmetric_scale, difference_threshold
-                            )
-                            
-                            # Display decomposition results
-                            st.markdown("#### 📊 Difference Decomposition Results")
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Scaling Factor", f"{decomp_results['scaling_factor']:.3f}")
-                            with col2:
-                                st.metric("Peak Shift", f"{decomp_results['shift_value']:+.2f} cm⁻¹")
-                            with col3:
-                                st.metric("Broadening Factor", f"{decomp_results['broadening_factor']:.3f}")
-                            
-                            # Display variance explained
-                            st.markdown("#### 📈 Variance Explained by Each Component")
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("Scaling", f"{decomp_results['scaling_pct']:.1f}%")
-                            with col2:
-                                st.metric("Shift", f"{decomp_results['shift_pct']:.1f}%")
-                            with col3:
-                                st.metric("Broadening", f"{decomp_results['broadening_pct']:.1f}%")
-                            with col4:
-                                st.metric("Residual", f"{decomp_results['residual_pct']:.1f}%")
-                            
-                            # Residual statistics
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("Residual RMS", f"{decomp_results['residual_std']:.4f}")
-                            with col2:
-                                st.metric("Max Residual", f"{decomp_results['max_residual']:.4f}")
-                            
-                            # Interpretation guide
-                            st.markdown("#### 💡 Interpretation Guide")
-                            interpretation = []
-                            if decomp_results['scaling_pct'] > 30:
-                                interpretation.append("🔹 **Scaling dominated**: Intensity changes significantly across entire spectrum")
-                            if decomp_results['shift_pct'] > 20:
-                                interpretation.append("🔹 **Shift dominated**: Peaks systematically shifted in frequency")
-                            if decomp_results['broadening_pct'] > 20:
-                                interpretation.append("🔹 **Broadening dominated**: Peak widths significantly changed")
-                            if decomp_results['residual_pct'] > 30:
-                                interpretation.append("🔹 **High residual**: Complex changes not captured by simple scaling/shift/broadening")
-                            if not interpretation:
-                                interpretation.append("🔹 **Simple changes**: Scaling, shift, and broadening explain most variations")
-                            
-                            for item in interpretation:
-                                st.write(item)
+                        fig, (mean_diff, max_abs_diff, rms_diff, correlation) = create_comparison_plot(
+                            spectrum_a, spectrum_b, name_a, name_b,
+                            x_label, y_label, norm_method, norm_range,
+                            norm_offset_step, fill_area, fill_alpha, subtract_min_intensity,
+                            show_grid, line_width, fig_width, fig_height,
+                            cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
+                            selected_colormap, smooth_difference, smooth_sigma,
+                            symmetric_scale, difference_threshold
+                        )
                         
+                        # Display statistics
+                        st.markdown("#### 📊 Difference Statistics")
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Mean Difference", f"{mean_diff:.4f}")
+                        with col2:
+                            st.metric("Max |Difference|", f"{max_abs_diff:.4f}")
+                        with col3:
+                            st.metric("RMS Difference", f"{rms_diff:.4f}")
+                        with col4:
+                            st.metric("Spectral Correlation", f"{correlation:.4f}", 
+                                     delta="strong" if abs(correlation) > 0.7 else "weak")
+                        
+                        # Display the plot
                         st.pyplot(fig)
                         
+                        # Download buttons
                         col1, col2 = st.columns(2)
                         with col1:
+                            # Download plot as PNG
                             buf = BytesIO()
                             fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
                             buf.seek(0)
@@ -3441,6 +2638,8 @@ def main():
                             """, unsafe_allow_html=True)
                         
                         with col2:
+                            # Export difference data
+                            # Recalculate difference data for export
                             x_a = spectrum_a['data']['x'].values
                             y_a_raw = spectrum_a['data']['y'].values
                             y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
@@ -3458,7 +2657,10 @@ def main():
                                 y_a_interp_exp = y_a_interp_exp - y_a_interp_exp.min()
                                 y_b_interp_exp = y_b_interp_exp - y_b_interp_exp.min()
                             
-                            y_diff_exp = y_b_interp_exp - y_a_interp_exp
+                            if swap_direction:
+                                y_diff_exp = y_b_interp_exp - y_a_interp_exp
+                            else:
+                                y_diff_exp = y_a_interp_exp - y_b_interp_exp
                             
                             diff_df = pd.DataFrame({
                                 'x': common_x_exp,
@@ -3483,756 +2685,143 @@ def main():
             
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # NEW TAB 5: Statistical Analysis
-        with tab5:
-            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-            st.subheader("📐 Statistical Analysis")
-            st.markdown("*Statistical analysis of spectra and peak parameters*")
-            
-            # Correlation matrix
-            st.markdown("#### 📊 Spectral Correlation Matrix")
-            st.markdown("*Visualize correlations between all spectra*")
-            
-            if len(filtered_spectra) >= 2:
-                # Select range for correlation
-                corr_x_min = float(np.min([spec['data']['x'].min() for spec in filtered_spectra.values()]))
-                corr_x_max = float(np.max([spec['data']['x'].max() for spec in filtered_spectra.values()]))
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    corr_left = st.slider(
-                        "Correlation left boundary",
-                        min_value=corr_x_min,
-                        max_value=corr_x_max,
-                        value=corr_x_min,
-                        step=(corr_x_max - corr_x_min) / 100,
-                        key="corr_left"
-                    )
-                with col2:
-                    corr_right = st.slider(
-                        "Correlation right boundary",
-                        min_value=corr_x_min,
-                        max_value=corr_x_max,
-                        value=corr_x_max,
-                        step=(corr_x_max - corr_x_min) / 100,
-                        key="corr_right"
-                    )
-                
-                if corr_left < corr_right:
-                    corr_range = (corr_left, corr_right)
-                    
-                    if st.button("Generate Correlation Matrix", key="gen_corr_matrix"):
-                        corr_matrix, names = create_correlation_matrix(filtered_spectra, ordered_spectra, corr_range)
-                        if corr_matrix is not None:
-                            # Display heatmap
-                            fig, ax = plt.subplots(figsize=(10, 8))
-                            im = ax.imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1, aspect='auto')
-                            
-                            ax.set_xticks(range(len(names)))
-                            ax.set_yticks(range(len(names)))
-                            ax.set_xticklabels(names, rotation=45, ha='right', fontsize=8)
-                            ax.set_yticklabels(names, fontsize=8)
-                            
-                            # Add text annotations
-                            for i in range(len(names)):
-                                for j in range(len(names)):
-                                    text = ax.text(j, i, f'{corr_matrix[i, j]:.2f}',
-                                                 ha="center", va="center", color="black" if abs(corr_matrix[i, j]) < 0.7 else "white",
-                                                 fontsize=8)
-                            
-                            cbar = plt.colorbar(im, ax=ax)
-                            cbar.set_label('Correlation coefficient', fontsize=11, fontweight='bold')
-                            
-                            ax.set_title('Spectral Correlation Matrix', fontsize=12, fontweight='bold')
-                            plt.tight_layout()
-                            st.pyplot(fig)
-                            plt.close(fig)
-                            
-                            # Display correlation statistics
-                            st.markdown("#### 📈 Correlation Statistics")
-                            flat_corr = corr_matrix[np.triu_indices_from(corr_matrix, k=1)]
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Mean Correlation", f"{np.mean(flat_corr):.3f}")
-                            with col2:
-                                st.metric("Max Correlation", f"{np.max(flat_corr):.3f}")
-                            with col3:
-                                st.metric("Min Correlation", f"{np.min(flat_corr):.3f}")
-                            
-                            # Export correlation matrix
-                            corr_df = pd.DataFrame(corr_matrix, index=names, columns=names)
-                            csv_corr = corr_df.to_csv()
-                            st.download_button(
-                                label="📥 Download Correlation Matrix (CSV)",
-                                data=csv_corr,
-                                file_name=f"correlation_matrix_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv"
-                            )
-                else:
-                    st.warning("Left boundary must be less than right boundary")
-            else:
-                st.info("Need at least 2 spectra for correlation analysis")
-            
-            # Statistical tests on spectra (comparison of entire spectra)
-            st.markdown("---")
-            st.markdown("#### 📊 Statistical Comparison of Spectra")
-            st.markdown("*Compare entire spectra using statistical tests*")
-            
-            if len(filtered_spectra) >= 2:
-                # Select two spectra to compare statistically
-                col1, col2 = st.columns(2)
-                with col1:
-                    spec_a_test = st.selectbox(
-                        "Spectrum A",
-                        options=list(filtered_spectra.keys()),
-                        index=0,
-                        key="spec_a_test"
-                    )
-                with col2:
-                    spec_b_test = st.selectbox(
-                        "Spectrum B",
-                        options=list(filtered_spectra.keys()),
-                        index=min(1, len(filtered_spectra)-1),
-                        key="spec_b_test"
-                    )
-                
-                if spec_a_test and spec_b_test and spec_a_test != spec_b_test:
-                    if st.button("Compare Spectra Statistically", key="stat_compare_spectra"):
-                        data_a = filtered_spectra[spec_a_test]['data']
-                        data_b = filtered_spectra[spec_b_test]['data']
-                        
-                        # Interpolate to common x
-                        x_common = np.linspace(
-                            max(data_a['x'].min(), data_b['x'].min()),
-                            min(data_a['x'].max(), data_b['x'].max()),
-                            1000
-                        )
-                        y_a = np.interp(x_common, data_a['x'].values, data_a['y'].values)
-                        y_b = np.interp(x_common, data_b['x'].values, data_b['y'].values)
-                        
-                        # Perform tests
-                        # 1. Kolmogorov-Smirnov test (comparing distributions)
-                        ks_stat, ks_p = kstest(y_a, y_b)
-                        
-                        # 2. Pearson correlation
-                        corr, corr_p = pearsonr(y_a, y_b)
-                        
-                        # 3. Mean difference test (t-test)
-                        t_stat, t_p = ttest_ind(y_a, y_b)
-                        
-                        # Display results
-                        st.markdown("#### Statistical Test Results")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("KS Statistic", f"{ks_stat:.4f}")
-                            st.metric("KS p-value", f"{ks_p:.4f}", delta="Significant" if ks_p < 0.05 else "Not significant")
-                        with col2:
-                            st.metric("Correlation", f"{corr:.4f}")
-                            st.metric("Correlation p-value", f"{corr_p:.4f}", delta="Significant" if corr_p < 0.05 else "Not significant")
-                        
-                        st.metric("t-statistic", f"{t_stat:.4f}")
-                        st.metric("t-test p-value", f"{t_p:.4f}", delta="Significant difference" if t_p < 0.05 else "No significant difference")
-            else:
-                st.info("Need at least 2 spectra for statistical comparison")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Export options section
+        st.markdown("---")
+        st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+        st.subheader("📤 Data Export")
         
-        # NEW TAB 6: Multivariate Analysis
-        with tab6:
-            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-            st.subheader("🧮 Multivariate Analysis")
-            st.markdown("*PCA, clustering, and advanced multivariate techniques*")
-            
-            if len(filtered_spectra) >= 3:
-                # PCA Analysis
-                st.markdown("#### 📊 Principal Component Analysis (PCA)")
-                st.markdown("*Dimensionality reduction to visualize spectral patterns*")
-                
-                # PCA range selection
-                pca_x_min = float(np.min([spec['data']['x'].min() for spec in filtered_spectra.values()]))
-                pca_x_max = float(np.max([spec['data']['x'].max() for spec in filtered_spectra.values()]))
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    pca_left = st.slider(
-                        "PCA left boundary",
-                        min_value=pca_x_min,
-                        max_value=pca_x_max,
-                        value=pca_x_min,
-                        step=(pca_x_max - pca_x_min) / 100,
-                        key="pca_left"
-                    )
-                with col2:
-                    pca_right = st.slider(
-                        "PCA right boundary",
-                        min_value=pca_x_min,
-                        max_value=pca_x_max,
-                        value=pca_x_max,
-                        step=(pca_x_max - pca_x_min) / 100,
-                        key="pca_right"
-                    )
-                
-                n_components = st.slider(
-                    "Number of principal components",
-                    min_value=2,
-                    max_value=min(10, len(filtered_spectra)),
-                    value=2,
-                    key="pca_components"
-                )
-                
-                if pca_left < pca_right:
-                    pca_range = (pca_left, pca_right)
-                    
-                    if st.button("Run PCA", key="run_pca"):
-                        with st.spinner("Performing PCA..."):
-                            pca_result, explained_var, cum_var, components = perform_pca(
-                                filtered_spectra, ordered_spectra, n_components, pca_range
-                            )
-                            
-                            if pca_result is not None:
-                                st.session_state.pca_results = {
-                                    'scores': pca_result,
-                                    'explained_variance': explained_var,
-                                    'cumulative_variance': cum_var,
-                                    'components': components,
-                                    'names': [name.replace('.txt', '') for name in ordered_spectra if name in filtered_spectra]
-                                }
-                                
-                                # Display explained variance
-                                st.markdown("#### 📈 Explained Variance")
-                                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-                                
-                                # Scree plot
-                                ax1.bar(range(1, len(explained_var)+1), explained_var * 100, alpha=0.7, color='#1f77b4')
-                                ax1.set_xlabel('Principal Component', fontsize=11, fontweight='bold')
-                                ax1.set_ylabel('Explained Variance (%)', fontsize=11, fontweight='bold')
-                                ax1.set_title('Scree Plot', fontsize=12, fontweight='bold')
-                                ax1.grid(True, alpha=0.3, linestyle='--')
-                                
-                                # Cumulative variance
-                                ax2.plot(range(1, len(cum_var)+1), cum_var * 100, 'bo-', linewidth=2, markersize=8)
-                                ax2.set_xlabel('Number of Components', fontsize=11, fontweight='bold')
-                                ax2.set_ylabel('Cumulative Variance (%)', fontsize=11, fontweight='bold')
-                                ax2.set_title('Cumulative Variance', fontsize=12, fontweight='bold')
-                                ax2.grid(True, alpha=0.3, linestyle='--')
-                                
-                                plt.tight_layout()
-                                st.pyplot(fig)
-                                plt.close(fig)
-                                
-                                # Score plot (PC1 vs PC2)
-                                if pca_result.shape[1] >= 2:
-                                    st.markdown("#### 🎯 Score Plot")
-                                    fig, ax = plt.subplots(figsize=(10, 8))
-                                    
-                                    names = st.session_state.pca_results['names']
-                                    scatter = ax.scatter(pca_result[:, 0], pca_result[:, 1], 
-                                                       s=100, c=range(len(names)), cmap='viridis',
-                                                       alpha=0.7, edgecolors='black', linewidth=1.5)
-                                    
-                                    # Add labels
-                                    for i, name in enumerate(names):
-                                        ax.annotate(name, (pca_result[i, 0], pca_result[i, 1]),
-                                                   fontsize=8, ha='center', va='bottom')
-                                    
-                                    ax.set_xlabel(f'PC1 ({explained_var[0]*100:.1f}%)', fontsize=11, fontweight='bold')
-                                    ax.set_ylabel(f'PC2 ({explained_var[1]*100:.1f}%)', fontsize=11, fontweight='bold')
-                                    ax.set_title('PCA Score Plot', fontsize=12, fontweight='bold')
-                                    ax.grid(True, alpha=0.3, linestyle='--')
-                                    
-                                    plt.tight_layout()
-                                    st.pyplot(fig)
-                                    plt.close(fig)
-                                    
-                                    # Loading plot (PC1)
-                                    st.markdown("#### 📊 Loading Plot (PC1)")
-                                    fig, ax = plt.subplots(figsize=(10, 6))
-                                    
-                                    # Use common x grid
-                                    x_common = np.linspace(pca_range[0], pca_range[1], len(components[0]))
-                                    ax.plot(x_common, components[0], linewidth=2, color='#1f77b4')
-                                    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-                                    ax.set_xlabel(x_label, fontsize=11, fontweight='bold')
-                                    ax.set_ylabel('PC1 Loading', fontsize=11, fontweight='bold')
-                                    ax.set_title('PC1 Loadings', fontsize=12, fontweight='bold')
-                                    ax.grid(True, alpha=0.3, linestyle='--')
-                                    
-                                    plt.tight_layout()
-                                    st.pyplot(fig)
-                                    plt.close(fig)
-                            else:
-                                st.error("PCA failed. Check data quality.")
-                else:
-                    st.warning("Left boundary must be less than right boundary")
-                
-                # Cluster Analysis
-                st.markdown("---")
-                st.markdown("#### 📊 Cluster Analysis")
-                st.markdown("*Group spectra based on similarity*")
-                
-                cluster_method = st.selectbox(
-                    "Clustering method",
-                    options=["Hierarchical", "K-means"],
-                    index=0,
-                    key="cluster_method"
-                )
-                
-                n_clusters = st.slider(
-                    "Number of clusters",
-                    min_value=2,
-                    max_value=min(5, len(filtered_spectra)-1),
-                    value=2,
-                    key="n_clusters"
-                )
-                
-                if st.button("Run Clustering", key="run_clustering"):
-                    with st.spinner("Performing clustering..."):
-                        # Prepare data matrix
-                        data_matrix = []
-                        names = []
-                        for name in ordered_spectra:
-                            if name in filtered_spectra:
-                                data = filtered_spectra[name]['data']
-                                y = data['y'].values
-                                data_matrix.append(y)
-                                names.append(name.replace('.txt', ''))
-                        
-                        if data_matrix:
-                            data_matrix = np.array(data_matrix)
-                            
-                            if cluster_method == "Hierarchical":
-                                # Hierarchical clustering
-                                linkage_matrix = linkage(data_matrix, method='ward')
-                                fig, ax = plt.subplots(figsize=(12, 6))
-                                dendrogram(linkage_matrix, labels=names, ax=ax,
-                                          leaf_rotation=45, leaf_font_size=8)
-                                ax.set_title('Hierarchical Clustering Dendrogram', fontsize=12, fontweight='bold')
-                                ax.set_xlabel('Spectra', fontsize=11, fontweight='bold')
-                                ax.set_ylabel('Distance', fontsize=11, fontweight='bold')
-                                plt.tight_layout()
-                                st.pyplot(fig)
-                                plt.close(fig)
-                                
-                                # Get cluster assignments
-                                from scipy.cluster.hierarchy import fcluster
-                                clusters = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
-                            else:
-                                # K-means clustering
-                                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-                                clusters = kmeans.fit_predict(data_matrix)
-                                
-                                # Visualize clusters in PC space if PCA was run
-                                if st.session_state.pca_results is not None:
-                                    pca_scores = st.session_state.pca_results['scores']
-                                    fig, ax = plt.subplots(figsize=(10, 8))
-                                    scatter = ax.scatter(pca_scores[:, 0], pca_scores[:, 1],
-                                                       c=clusters, cmap='viridis', s=100,
-                                                       alpha=0.7, edgecolors='black', linewidth=1.5)
-                                    
-                                    for i, name in enumerate(names):
-                                        ax.annotate(name, (pca_scores[i, 0], pca_scores[i, 1]),
-                                                   fontsize=8, ha='center', va='bottom')
-                                    
-                                    ax.set_xlabel('PC1', fontsize=11, fontweight='bold')
-                                    ax.set_ylabel('PC2', fontsize=11, fontweight='bold')
-                                    ax.set_title(f'K-means Clusters (k={n_clusters})', fontsize=12, fontweight='bold')
-                                    ax.grid(True, alpha=0.3, linestyle='--')
-                                    plt.colorbar(scatter, ax=ax, label='Cluster')
-                                    plt.tight_layout()
-                                    st.pyplot(fig)
-                                    plt.close(fig)
-                            
-                            # Display cluster assignments
-                            st.markdown("#### 🏷️ Cluster Assignments")
-                            cluster_df = pd.DataFrame({
-                                'Spectrum': names,
-                                'Cluster': clusters
-                            })
-                            st.dataframe(cluster_df, use_container_width=True)
-                            
-                            # Export cluster data
-                            csv_cluster = cluster_df.to_csv(index=False)
-                            st.download_button(
-                                label="📥 Download Cluster Assignments (CSV)",
-                                data=csv_cluster,
-                                file_name=f"cluster_assignments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv"
-                            )
-            else:
-                st.info("Need at least 3 spectra for multivariate analysis")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
         
-        # NEW TAB 7: Documentation
-        with tab7:
-            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-            st.subheader("📚 Documentation")
-            st.markdown("*Complete guide to SpectrAnalys features and workflows*")
-            
-            st.markdown("""
-            ## 📖 Table of Contents
-            1. [Getting Started](#getting-started)
-            2. [Data Import and Processing](#data-import)
-            3. [Visualization](#visualization)
-            4. [Peak Analysis](#peak-analysis)
-            5. [Correlation Analysis](#correlation)
-            6. [Spectral Comparison](#comparison)
-            7. [Statistical Analysis](#statistical)
-            8. [Multivariate Analysis](#multivariate)
-            9. [Advanced Processing](#advanced)
-            10. [Frequently Asked Questions](#faq)
-            11. [Troubleshooting](#troubleshooting)
-            
-            ---
-            
-            <a name="getting-started"></a>
-            ## 1. Getting Started
-
-            ### Basic Workflow
-            1. **Upload Files**: Use the sidebar to upload one or more .txt files
-            2. **Select Spectra**: Choose which spectra to display and analyze
-            3. **Configure Settings**: Set normalization, offset, colors, and processing options
-            4. **Visualize**: Explore spectra in the combined visualization tab
-            5. **Analyze**: Use peak analysis, correlation, comparison, or multivariate tools
-            6. **Export**: Download data, plots, and results in various formats
-            
-            ---
-            
-            <a name="data-import"></a>
-            ## 2. Data Import and Processing
-            
-            ### Uploading Files
-            - Files must be in .txt format with tab-separated columns
-            - First column: x-axis values (e.g., Raman shift)
-            - Second column: y-axis values (e.g., intensity)
-            - Multiple files can be uploaded simultaneously
-            
-            ### Spectrum Selection
-            - Use the multi-select box to choose which spectra to display
-            - Spectra can be reordered by selecting in desired order
-            - Each spectrum can be assigned a custom color
-            
-            ### X-Axis Ranges
-            - **Full range**: Display the entire spectrum
-            - **Custom ranges**: Define multiple ranges (e.g., 100-150, 350-450)
-            - Multiple ranges are displayed as separate segments with gaps
-            
-            ### Normalization Methods
-            1. **Maximum intensity**: Normalize to the highest intensity peak
-            2. **Peak intensity (range)**: Normalize to the maximum in a user-defined range
-            3. **Maximum rest intensity**: Normalize to the maximum in specified ranges (useful for spectra with large background)
-            
-            ### Offset Settings
-            - **Raw spectra offset**: Add vertical offset to raw spectra for clear visualization
-            - **Normalized spectra offset**: Add vertical offset to normalized spectra
-            - Offset increases cumulatively: 1st spectrum at 0, 2nd at +step, 3rd at +2×step, etc.
-            
-            ---
-            
-            <a name="visualization"></a>
-            ## 3. Visualization
-            
-            ### Four Visualization Modes
-            1. **Raw spectra**: Original intensity values
-            2. **Normalized spectra**: Intensity normalized to 0-1 scale
-            3. **Raw spectra with offsets**: Raw spectra with cumulative vertical offset
-            4. **Normalized spectra with offsets**: Normalized spectra with cumulative vertical offset
-            
-            ### Customization Options
-            - **Fill area**: Fill the area under normalized curves
-            - **Fill transparency**: Adjust fill opacity (0.2-0.9)
-            - **Subtract minimum intensity**: Remove baseline offset
-            - **Grid**: Toggle grid lines
-            - **Line thickness**: Adjust spectrum line width
-            
-            ### Legend Settings
-            - Position: Right, Best, Upper right, Upper left, Lower left, Lower right
-            - Font size: 4-16 points
-            - Offset: Adjust legend distance from plot
-            
-            ### Heatmap Visualization
-            - Requires assigning numeric values to spectra (temperature, concentration, etc.)
-            - Interpolation methods: None, Bilinear, Bicubic, Spline16, Spline36, Gaussian, Lanczos
-            - Color palettes: Viridis, Plasma, Inferno, Magma, Cividis, Spectral, Cool-Warm, etc.
-            - Log scale available for intensity data
-            
-            ---
-            
-            <a name="peak-analysis"></a>
-            ## 4. Peak Analysis
-            
-            ### Detection and Analysis
-            1. **Select range**: Use sliders to choose analysis region
-            2. **Run analysis**: Click "Analyze" to detect peaks
-            3. **Review results**: Check/uncheck peaks to include/exclude
-            4. **Visualize**: View peaks on the spectrum
-            
-            ### Peak Parameters
-            - **Position**: Peak center (cm⁻¹)
-            - **Intensity**: Peak height (a.u.)
-            - **Area**: Integrated peak area
-            - **FWHM**: Full Width at Half Maximum
-            
-            ### Include/Exclude Peaks
-            - Use checkboxes to include/exclude peaks from analysis
-            - Only included peaks appear in visualization and correlation analysis
-            - Excluded peaks are hidden but not deleted
-            
-            ### Statistical Tests on Peaks
-            - **t-test**: Compare peak parameters between two groups
-            - **ANOVA**: Compare peak parameters among three or more groups
-            - **Mann-Whitney U test**: Non-parametric comparison
-            - **Shapiro-Wilk test**: Test for normal distribution
-            
-            ---
-            
-            <a name="correlation"></a>
-            ## 5. Correlation Analysis
-            
-            ### Setup
-            1. Enable correlation analysis in sidebar
-            2. Assign numeric values to each spectrum
-            3. Run peak analysis first (required)
-            4. Select spectra and parameters
-            
-            ### Correlation Plots
-            - **Intensity vs parameter**: Scatter plot with correlation coefficient
-            - **Area vs parameter**: Correlation of peak area
-            - **Position vs parameter**: Correlation of peak position
-            - **FWHM vs parameter**: Correlation of peak width
-            
-            ### Interpretation
-            - **r > 0.7**: Strong positive correlation
-            - **r < -0.7**: Strong negative correlation
-            - **|r| < 0.3**: Weak or no correlation
-            - **p < 0.05**: Statistically significant
-            
-            ---
-            
-            <a name="comparison"></a>
-            ## 6. Spectral Comparison
-            
-            ### Standard Difference Analysis
-            - Compare two spectra with difference profile
-            - Colored heatmap shows difference intensity
-            - Highlight regions with significant differences
-            
-            ### Difference Decomposition (NEW)
-            Identifies the nature of differences:
-            
-            1. **Scaling**: Overall intensity change (multiplication factor)
-            2. **Shift**: Peak position change (frequency shift)
-            3. **Broadening**: Peak width change (FWHM change)
-            
-            **Interpretation Guide:**
-            - **Scaling > 30%**: Intensity changes across entire spectrum
-            - **Shift > 20%**: Systematic peak frequency shift
-            - **Broadening > 20%**: Significant peak width changes
-            - **Residual > 30%**: Complex changes not explained by simple effects
-            
-            ---
-            
-            <a name="statistical"></a>
-            ## 7. Statistical Analysis
-            
-            ### Correlation Matrix
-            - Visualize correlations between all spectra
-            - Red: Negative correlation, Blue: Positive correlation
-            - Export matrix as CSV
-            
-            ### Spectral Comparison Tests
-            - **KS test**: Compare spectral distributions
-            - **Pearson correlation**: Linear relationship between spectra
-            - **t-test**: Mean difference between spectra
-            
-            ---
-            
-            <a name="multivariate"></a>
-            ## 8. Multivariate Analysis
-            
-            ### Principal Component Analysis (PCA)
-            - **Score plot**: Visualize spectral patterns
-            - **Loading plot**: Identify important spectral regions
-            - **Scree plot**: Determine optimal number of components
-            - **Explained variance**: Understand data structure
-            
-            ### Cluster Analysis
-            - **Hierarchical clustering**: Dendrogram visualization
-            - **K-means clustering**: Group spectra by similarity
-            - **Cluster assignments**: View which spectra belong to which group
-            
-            ---
-            
-            <a name="advanced"></a>
-            ## 9. Advanced Processing
-            
-            ### Savitzky-Golay Filter
-            - Smooth spectra while preserving peak shapes
-            - **Window length**: Odd number (5-21)
-            - **Polynomial order**: 2-5
-            - Higher order preserves details but may amplify noise
-            
-            ### Baseline Correction
-            1. **ALS (Asymmetric Least Squares)**:
-               - Lambda: Smoothness parameter (higher = smoother)
-               - p: Asymmetry parameter (higher = more aggressive)
-            
-            2. **Polynomial**:
-               - Degree: 1-6
-               - Iteratively removes peaks for baseline estimation
-            
-            3. **Rolling Ball**:
-               - Window size: 10-200 points
-               - Simulates a ball rolling over the spectrum
-            
-            ---
-            
-            <a name="faq"></a>
-            ## 10. Frequently Asked Questions
-            
-            ### Q: What file formats are supported?
-            A: .txt files with two tab-separated columns (x, y).
-            
-            ### Q: How many spectra can I analyze?
-            A: There's no hard limit, but performance may decrease with >50 spectra.
-            
-            ### Q: What normalization method should I use?
-            A: Use "Maximum intensity" for most cases. Use "Peak intensity (range)" if you want to normalize to a specific reference peak.
-            
-            ### Q: Why aren't any peaks detected?
-            A: Try adjusting the analysis range or peak detection parameters. Peaks must have sufficient height and prominence.
-            
-            ### Q: What does the difference decomposition show?
-            A: It breaks down differences into scaling (intensity change), shift (frequency change), and broadening (width change) to help understand the nature of changes.
-            
-            ### Q: Can I export plots for publication?
-            A: Yes, plots can be downloaded as high-resolution PNG (600 dpi).
-            
-            ---
-            
-            <a name="troubleshooting"></a>
-            ## 11. Troubleshooting
-            
-            ### Common Issues
-            
-            **No data displayed:**
-            - Check file format (two columns, tab-separated)
-            - Verify data contains numeric values
-            - Ensure spectra are selected in the sidebar
-            
-            **Slow performance:**
-            - Reduce number of displayed spectra
-            - Use fewer interpolation points
-            - Disable animations if enabled
-            
-            **PCA fails:**
-            - Ensure at least 3 spectra are loaded
-            - Check that spectra have sufficient data points
-            - Try reducing the spectral range
-            
-            **Peak analysis shows no results:**
-            - Adjust detection parameters (height, prominence)
-            - Try a different spectral range
-            - Check that spectra are properly normalized
-            
-            **Heatmap not appearing:**
-            - Assign numeric values to all spectra
-            - Click "Apply for heatmaps" button
-            - Ensure heatmap parameters are set correctly
-            
-            ### Getting Help
-            - Check the documentation above
-            - Review the data format requirements
-            - Ensure all inputs are valid
-            
-            """)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Export options section
-            st.markdown("---")
-            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-            st.subheader("📤 Data Export")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if filtered_spectra:
-                    export_data = pd.DataFrame()
-                    for name, spec in filtered_spectra.items():
-                        data = spec['data']
-                        temp_df = pd.DataFrame({
-                            f"{name.replace('.txt', '')}_x": data['x'].values,
-                            f"{name.replace('.txt', '')}_y": data['y'].values
-                        })
-                        if export_data.empty:
-                            export_data = temp_df
-                        else:
-                            export_data = pd.concat([export_data, temp_df], axis=1)
-                    
-                    csv = export_data.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Export Raw Data (CSV)",
-                        data=csv,
-                        file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-            
-            with col2:
-                if filtered_spectra:
-                    export_norm = pd.DataFrame()
-                    for name, spec in filtered_spectra.items():
-                        data = spec['data']
-                        y_norm = normalize_spectrum(
-                            data['x'].values, 
-                            data['y'].values, 
-                            norm_method, 
-                            norm_range,
-                            x_ranges
-                        )
-                        temp_df = pd.DataFrame({
-                            f"{name.replace('.txt', '')}_x": data['x'].values,
-                            f"{name.replace('.txt', '')}_y_norm": y_norm
-                        })
-                        if export_norm.empty:
-                            export_norm = temp_df
-                        else:
-                            export_norm = pd.concat([export_norm, temp_df], axis=1)
-                    
-                    csv_norm = export_norm.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Export Normalized Data (CSV)",
-                        data=csv_norm,
-                        file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-            
-            with col3:
-                session_info = f"""SpectrAnalys Analysis Session
-                Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                Spectra Files: {', '.join(ordered_spectra)}
-                Normalization Method: {norm_method}
-                X-axis Ranges: {x_ranges if x_ranges else 'Full range'}
-                Raw Offset Step: {raw_offset_step}
-                Normalized Offset Step: {norm_offset_step}
-                Fill Area: {fill_area}
-                Fill Transparency: {fill_alpha}
-                Subtract Minimum Intensity: {subtract_min_intensity}
-                Grid Enabled: {show_grid}
-                Line Width: {line_width}
-                Peak Analysis: {analyze_peaks_flag}
-                Correlation Analysis: {param_correlation}
-                Savitzky-Golay Filter: {'Enabled' if savgol_window else 'Disabled'}
-                Baseline Correction: {baseline_method if baseline_method else 'None'}
-                """
+        with col1:
+            # Export raw data
+            if filtered_spectra:
+                export_data = pd.DataFrame()
+                for name, spec in filtered_spectra.items():
+                    data = spec['data']
+                    temp_df = pd.DataFrame({
+                        f"{name.replace('.txt', '')}_x": data['x'].values,
+                        f"{name.replace('.txt', '')}_y": data['y'].values
+                    })
+                    if export_data.empty:
+                        export_data = temp_df
+                    else:
+                        export_data = pd.concat([export_data, temp_df], axis=1)
+                
+                csv = export_data.to_csv(index=False)
                 st.download_button(
-                    label="📄 Export Session Info",
-                    data=session_info,
-                    file_name=f"spectranalys_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
+                    label="📥 Export Raw Data (CSV)",
+                    data=csv,
+                    file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
                 )
+        
+        with col2:
+            # Export normalized data
+            if filtered_spectra:
+                export_norm = pd.DataFrame()
+                for name, spec in filtered_spectra.items():
+                    data = spec['data']
+                    y_norm = normalize_spectrum(
+                        data['x'].values, 
+                        data['y'].values, 
+                        norm_method, 
+                        norm_range,
+                        x_ranges  # Pass x_ranges for "Maximum rest intensity" method
+                    )
+                    # Используем временный DataFrame для каждого спектра, чтобы избежать ошибки несовпадения длин
+                    temp_df = pd.DataFrame({
+                        f"{name.replace('.txt', '')}_x": data['x'].values,
+                        f"{name.replace('.txt', '')}_y_norm": y_norm
+                    })
+                    if export_norm.empty:
+                        export_norm = temp_df
+                    else:
+                        export_norm = pd.concat([export_norm, temp_df], axis=1)
                 
-                st.markdown('</div>', unsafe_allow_html=True)
+                csv_norm = export_norm.to_csv(index=False)
+                st.download_button(
+                    label="📥 Export Normalized Data (CSV)",
+                    data=csv_norm,
+                    file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+        
+        with col3:
+            # Export session info
+            session_info = f"""SpectrAnalys Analysis Session
+Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Spectra Files: {', '.join(ordered_spectra)}
+Normalization Method: {norm_method}
+X-axis Ranges: {x_ranges if x_ranges else 'Full range'}
+Raw Offset Step: {raw_offset_step}
+Normalized Offset Step: {norm_offset_step}
+Fill Area: {fill_area}
+Fill Transparency: {fill_alpha}
+Subtract Minimum Intensity: {subtract_min_intensity}
+Grid Enabled: {show_grid}
+Line Width: {line_width}
+Peak Analysis: {analyze_peaks_flag}
+Correlation Analysis: {param_correlation}
+"""
+            st.download_button(
+                label="📄 Export Session Info",
+                data=session_info,
+                file_name=f"spectranalys_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                mime="text/plain"
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    else:
+        # Welcome screen with instructions
+        st.markdown("## 🎯 Welcome to SpectrAnalys")
+        st.markdown("Advanced spectroscopic data analysis platform for researchers and scientists")
+        
+        st.markdown("### 📖 Quick Start Guide:")
+        st.markdown("""
+        1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
+        2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
+        3. **Visualize** - Explore combined spectra visualization with multiple display modes
+        4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
+        5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
+        6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
+        7. **Export Results** - Download processed data, plots, and analysis results
+        """)
+        
+        st.markdown("### ✨ Key Features:")
+        st.markdown("""
+        - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
+        - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
+        - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
+        - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
+        - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
+        - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
+        - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
+        - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
+        - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
+        - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
+        - 🎛️ **Adjustable Transparency** - Control fill opacity from 0.2 to 0.9
+        - ⚙️ **Grid & Line Thickness** - Customize plot appearance
+        """)
+        
+        st.markdown("### 📁 File Format:")
+        st.markdown("Your .txt files should contain two columns separated by tabs:")
+        st.code("""
+100.5    1250.3
+101.2    1248.7
+102.0    1251.5
+...
+        """, language="text")
+        
+        st.markdown("**Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!**")
+    
+    # Footer
+    st.markdown("""
+    <div class="footer">
+        <p>🔬 SpectrAnalys v2.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
+        <p style="font-size: 0.75rem;">© 2024 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
