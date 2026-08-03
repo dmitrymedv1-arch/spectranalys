@@ -61,6 +61,8 @@ if 'heatmap_ordered_names' not in st.session_state:
     st.session_state.heatmap_ordered_names = []
 if 'heatmap_y_label' not in st.session_state:
     st.session_state.heatmap_y_label = 'Temperature (°C)'
+if 'heatmap_x_ranges' not in st.session_state:
+    st.session_state.heatmap_x_ranges = None
 
 # Custom CSS for modern scientific design
 st.markdown("""
@@ -1791,6 +1793,7 @@ def main():
                         st.session_state.heatmap_y_label = heatmap_y_label
                         st.session_state.heatmap_applied = True
                         st.session_state.heatmap_ordered_names = ordered_spectra
+                        st.session_state.heatmap_x_ranges = x_ranges  # <-- СОХРАНЯЕМ x_ranges в session_state
                         
                         # Prepare heatmap data
                         spectra_matrix, spectra_norm_matrix, x_grid, y_values = prepare_heatmap_data(
@@ -2056,6 +2059,7 @@ def main():
                 heatmap_y_label = st.session_state.get('heatmap_y_label', 'Parameter')
                 heatmap_interpolation = st.session_state.get('heatmap_interpolation', 'gaussian')
                 heatmap_colormap = st.session_state.get('heatmap_colormap', 'viridis')
+                heatmap_x_ranges = st.session_state.get('heatmap_x_ranges', None)
                 
                 if spectra_matrix is not None and x_grid is not None and y_values is not None:
                     # Determine if we should use log scale
