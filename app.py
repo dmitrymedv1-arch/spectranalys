@@ -1243,18 +1243,27 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
         data_matrix = np.log10(data_matrix)
         colorbar_label = f"log10({colorbar_label})"
     
-    # Create heatmap with imshow
+    # Create heatmap with imshow - transpose matrix for correct orientation
+    # X-axis: parameter (y_values), Y-axis: Raman shift (x_grid)
     extent = [y_values[0], y_values[-1], x_grid[0], x_grid[-1]]
     
+    # Transpose the matrix so that rows = Raman shift, columns = parameter
     data_matrix_transposed = data_matrix.T
     
+    # Set vmin and vmax for colorbar to show full range
+    vmin = np.nanmin(data_matrix_transposed)
+    vmax = np.nanmax(data_matrix_transposed)
+    
+    # Use imshow with specified interpolation
     im = ax.imshow(data_matrix_transposed, 
                    extent=extent, 
                    aspect='auto', 
                    origin='lower',
                    cmap=colormap,
                    interpolation=interpolation,
-                   interpolation_stage='data' if interpolation != 'none' else None)
+                   interpolation_stage='data' if interpolation != 'none' else None,
+                   vmin=vmin,
+                   vmax=vmax)
     
     # Add colorbar
     cbar = fig.colorbar(im, ax=ax)
