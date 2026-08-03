@@ -3783,337 +3783,337 @@ def main():
             Upload `.txt` files with two columns (x y) separated by tabs:
 
 
-        ### Basic Workflow
-        1. **Upload Data** - Select one or more .txt files
-        2. **Configure Analysis** - Choose spectra, assign colors, set parameters
-        3. **Visualize** - Explore combined spectra visualization
-        4. **Analyze Peaks** - Detect and characterize spectral peaks
-        5. **Correlate Parameters** - Investigate relationships with experimental parameters
-        6. **Compare Spectra** - Analyze differences between two spectra
-        7. **Multivariate Analysis** - PCA and cluster analysis
-        8. **Export Results** - Download processed data and plots
+    ### Basic Workflow
+    1. **Upload Data** - Select one or more .txt files
+    2. **Configure Analysis** - Choose spectra, assign colors, set parameters
+    3. **Visualize** - Explore combined spectra visualization
+    4. **Analyze Peaks** - Detect and characterize spectral peaks
+    5. **Correlate Parameters** - Investigate relationships with experimental parameters
+    6. **Compare Spectra** - Analyze differences between two spectra
+    7. **Multivariate Analysis** - PCA and cluster analysis
+    8. **Export Results** - Download processed data and plots
+    
+    ## 📊 Visualization Tab
+    
+    ### Four Visualization Modes
+    1. **Raw Spectra** - Original intensity data
+    2. **Normalized Spectra** - Intensity normalized by selected method
+    3. **Offset Raw Spectra** - Raw spectra with cumulative offsets
+    4. **Offset Normalized** - Normalized spectra with cumulative offsets
+    
+    ### X-axis Ranges (Broken Axis)
+    - **Full range** - Display entire spectrum
+    - **Custom ranges** - Display multiple x-axis ranges with gaps
+    - Example: `100-150, 350-450, 600-800`
+    
+    ### Normalization Methods
+    - **Maximum intensity** - Divide by global maximum
+    - **Peak intensity (range)** - Divide by maximum in specified range
+    - **Maximum rest intensity** - Divide by maximum in selected ranges
+    
+    ### Offset Settings
+    - Cumulative offset: 1st spectrum at 0, 2nd at +step, 3rd at +2×step
+    - Adjust step size for optimal visualization
+    
+    ## 🔍 Peak Analysis Tab
+    
+    ### Selecting Analysis Range
+    - Use sliders to select left and right boundaries
+    - Visual feedback shows selected range on spectra
+    
+    ### Peak Detection Parameters
+    - **Peak width** - Number of points for area calculation
+    - Detects peaks based on height and prominence
+    
+    ### Peak Parameters
+    - **Position** - x-coordinate of peak maximum
+    - **Intensity** - y-value at peak maximum
+    - **Area** - Integral under peak
+    - **FWHM** - Full Width at Half Maximum
+    
+    ### Include/Exclude Peaks
+    - Check/uncheck peaks for inclusion in analysis
+    - Only included peaks appear in visualizations and correlations
+    
+    ## 📈 Parameter Correlation Tab
+    
+    ### Assigning Parameters
+    - Enter numeric values for each spectrum in sidebar
+    - Parameter can be temperature, concentration, sample number, etc.
+    
+    ### Correlation Metrics
+    - **Pearson correlation coefficient** (r)
+      - r > 0.7: Strong positive correlation
+      - r < -0.7: Strong negative correlation
+      - |r| < 0.3: Weak correlation
+    
+    ### Visualizations
+    - Scatter plots for each peak parameter vs assigned parameter
+    - Trend lines and correlation coefficients displayed
+    
+    ## 🔀 Compare Spectra Tab
+    
+    ### Difference Analysis
+    - Compares two spectra (Reference vs Sample)
+    - Difference = Sample - Reference
+    - Colormap shows positive (red) and negative (blue) differences
+    
+    ### Difference Decomposition
+    Identifies nature of spectral changes:
+    - **Scaling** - Overall intensity change (multiplicative)
+    - **Shift** - Peak position change (frequency shift)
+    - **Broadening** - Peak width change
+    - **Other** - Remaining differences
+    
+    ### Interpretation
+    - **Scaling factor > 1** - Sample has higher intensity
+    - **Shift > 0** - Peaks shifted to higher frequencies
+    - **Shift < 0** - Peaks shifted to lower frequencies
+    - **Broadening > 1** - Peaks wider in sample
+    
+    ## 📊 Multivariate Analysis Tab
+    
+    ### Principal Component Analysis (PCA)
+    - Reduces dimensionality to identify patterns
+    - **Score plot** - Shows grouping/clustering of spectra
+    - **Loading plot** - Identifies important spectral regions
+    - **Scree plot** - Shows explained variance
+    
+    ### Cluster Analysis
+    - **Hierarchical** - Dendrogram shows similarity hierarchy
+    - **K-Means** - Groups spectra into k clusters
+    - Optimal cluster number via Elbow method
+    
+    ## 📈 Peak Statistics Tab
+    
+    ### Box/Violin Plots
+    - Visualize distribution of peak parameters
+    - Compare between spectra or user-defined groups
+    
+    ### Statistical Tests
+    - **T-test** - Compare two groups (parametric)
+    - **Mann-Whitney U** - Compare two groups (non-parametric)
+    - **ANOVA** - Compare three or more groups (parametric)
+    - **Kruskal-Wallis** - Compare three or more groups (non-parametric)
+    
+    ### Interpreting p-values
+    - p < 0.05: Statistically significant difference
+    - p > 0.05: No significant difference
+    
+    ## 🎨 Signal Processing Options
+    
+    ### Filtering
+    - **Savitzky-Golay** - Polynomial smoothing preserving peak shape
+      - Window length: Number of points (odd)
+      - Polynomial order: 2-5
+    - **Gaussian** - Simple Gaussian smoothing
+    
+    ### Baseline Correction
+    - **ALS** (Asymmetric Least Squares)
+      - Lambda: Smoothness parameter (higher = smoother)
+      - p: Asymmetry parameter (0.001-0.1)
+    
+    ### Second Derivative
+    - Enhances peak detection
+    - Useful for overlapping peaks
+    
+    ## 🔧 Troubleshooting
+    
+    ### Common Issues
+    
+    **Q: No peaks detected**
+    - Adjust range boundaries
+    - Lower detection thresholds
+    - Check if spectra contain peaks in selected range
+    
+    **Q: Correlations not showing**
+    - Run peak analysis first
+    - Ensure peaks are "included" (checkbox)
+    - Check that at least 3 spectra have peak data
+    
+    **Q: Difference decomposition shows NaN**
+    - Ensure both spectra are normalized
+    - Check for zero values in spectra
+    - Try different normalization method
+    
+    **Q: PCA fails**
+    - Need at least 3 spectra
+    - Check for constant/near-constant spectra
+    - Try normalizing data
+    
+    ## 💡 Tips
+    
+    1. **Color assignment** - Use distinct colors for easy identification
+    2. **Offset step** - Adjust to prevent spectra overlap
+    3. **Normalization** - Try different methods for best results
+    4. **X-axis ranges** - Focus on regions of interest
+    5. **Peak width** - Adjust based on peak sharpness
+    6. **Save plots** - Use download buttons for publication-ready figures
+    
+    ## ⚡ Keyboard Shortcuts
+    
+    - **Ctrl+Enter** - Run analysis
+    - **Tab** - Navigate between tabs
+    - **Space** - Toggle checkboxes
+    
+    ## 📤 Export Options
+    
+    - **Raw Data** - CSV with all spectra
+    - **Normalized Data** - CSV with normalized spectra
+    - **Peak Analysis** - CSV with peak parameters
+    - **Plots** - PNG (600 dpi, high quality)
+    - **Session Info** - TXT with all settings
+    
+    ## 🤝 Support
+    
+    For issues or feature requests, please contact support.
+    
+    ## 📄 License
+    
+    SpectrAnalys v2.0 - Scientific Spectroscopic Analysis Platform
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Export options section
+    st.markdown("---")
+    st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+    st.subheader("📤 Data Export")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+    if filtered_spectra:
+        export_data = pd.DataFrame()
+        for name, spec in filtered_spectra.items():
+            data = spec['data']
+            temp_df = pd.DataFrame({
+                f"{name.replace('.txt', '')}_x": data['x'].values,
+                f"{name.replace('.txt', '')}_y": data['y'].values
+            })
+            if export_data.empty:
+                export_data = temp_df
+            else:
+                export_data = pd.concat([export_data, temp_df], axis=1)
         
-        ## 📊 Visualization Tab
-        
-        ### Four Visualization Modes
-        1. **Raw Spectra** - Original intensity data
-        2. **Normalized Spectra** - Intensity normalized by selected method
-        3. **Offset Raw Spectra** - Raw spectra with cumulative offsets
-        4. **Offset Normalized** - Normalized spectra with cumulative offsets
-        
-        ### X-axis Ranges (Broken Axis)
-        - **Full range** - Display entire spectrum
-        - **Custom ranges** - Display multiple x-axis ranges with gaps
-        - Example: `100-150, 350-450, 600-800`
-        
-        ### Normalization Methods
-        - **Maximum intensity** - Divide by global maximum
-        - **Peak intensity (range)** - Divide by maximum in specified range
-        - **Maximum rest intensity** - Divide by maximum in selected ranges
-        
-        ### Offset Settings
-        - Cumulative offset: 1st spectrum at 0, 2nd at +step, 3rd at +2×step
-        - Adjust step size for optimal visualization
-        
-        ## 🔍 Peak Analysis Tab
-        
-        ### Selecting Analysis Range
-        - Use sliders to select left and right boundaries
-        - Visual feedback shows selected range on spectra
-        
-        ### Peak Detection Parameters
-        - **Peak width** - Number of points for area calculation
-        - Detects peaks based on height and prominence
-        
-        ### Peak Parameters
-        - **Position** - x-coordinate of peak maximum
-        - **Intensity** - y-value at peak maximum
-        - **Area** - Integral under peak
-        - **FWHM** - Full Width at Half Maximum
-        
-        ### Include/Exclude Peaks
-        - Check/uncheck peaks for inclusion in analysis
-        - Only included peaks appear in visualizations and correlations
-        
-        ## 📈 Parameter Correlation Tab
-        
-        ### Assigning Parameters
-        - Enter numeric values for each spectrum in sidebar
-        - Parameter can be temperature, concentration, sample number, etc.
-        
-        ### Correlation Metrics
-        - **Pearson correlation coefficient** (r)
-          - r > 0.7: Strong positive correlation
-          - r < -0.7: Strong negative correlation
-          - |r| < 0.3: Weak correlation
-        
-        ### Visualizations
-        - Scatter plots for each peak parameter vs assigned parameter
-        - Trend lines and correlation coefficients displayed
-        
-        ## 🔀 Compare Spectra Tab
-        
-        ### Difference Analysis
-        - Compares two spectra (Reference vs Sample)
-        - Difference = Sample - Reference
-        - Colormap shows positive (red) and negative (blue) differences
-        
-        ### Difference Decomposition
-        Identifies nature of spectral changes:
-        - **Scaling** - Overall intensity change (multiplicative)
-        - **Shift** - Peak position change (frequency shift)
-        - **Broadening** - Peak width change
-        - **Other** - Remaining differences
-        
-        ### Interpretation
-        - **Scaling factor > 1** - Sample has higher intensity
-        - **Shift > 0** - Peaks shifted to higher frequencies
-        - **Shift < 0** - Peaks shifted to lower frequencies
-        - **Broadening > 1** - Peaks wider in sample
-        
-        ## 📊 Multivariate Analysis Tab
-        
-        ### Principal Component Analysis (PCA)
-        - Reduces dimensionality to identify patterns
-        - **Score plot** - Shows grouping/clustering of spectra
-        - **Loading plot** - Identifies important spectral regions
-        - **Scree plot** - Shows explained variance
-        
-        ### Cluster Analysis
-        - **Hierarchical** - Dendrogram shows similarity hierarchy
-        - **K-Means** - Groups spectra into k clusters
-        - Optimal cluster number via Elbow method
-        
-        ## 📈 Peak Statistics Tab
-        
-        ### Box/Violin Plots
-        - Visualize distribution of peak parameters
-        - Compare between spectra or user-defined groups
-        
-        ### Statistical Tests
-        - **T-test** - Compare two groups (parametric)
-        - **Mann-Whitney U** - Compare two groups (non-parametric)
-        - **ANOVA** - Compare three or more groups (parametric)
-        - **Kruskal-Wallis** - Compare three or more groups (non-parametric)
-        
-        ### Interpreting p-values
-        - p < 0.05: Statistically significant difference
-        - p > 0.05: No significant difference
-        
-        ## 🎨 Signal Processing Options
-        
-        ### Filtering
-        - **Savitzky-Golay** - Polynomial smoothing preserving peak shape
-          - Window length: Number of points (odd)
-          - Polynomial order: 2-5
-        - **Gaussian** - Simple Gaussian smoothing
-        
-        ### Baseline Correction
-        - **ALS** (Asymmetric Least Squares)
-          - Lambda: Smoothness parameter (higher = smoother)
-          - p: Asymmetry parameter (0.001-0.1)
-        
-        ### Second Derivative
-        - Enhances peak detection
-        - Useful for overlapping peaks
-        
-        ## 🔧 Troubleshooting
-        
-        ### Common Issues
-        
-        **Q: No peaks detected**
-        - Adjust range boundaries
-        - Lower detection thresholds
-        - Check if spectra contain peaks in selected range
-        
-        **Q: Correlations not showing**
-        - Run peak analysis first
-        - Ensure peaks are "included" (checkbox)
-        - Check that at least 3 spectra have peak data
-        
-        **Q: Difference decomposition shows NaN**
-        - Ensure both spectra are normalized
-        - Check for zero values in spectra
-        - Try different normalization method
-        
-        **Q: PCA fails**
-        - Need at least 3 spectra
-        - Check for constant/near-constant spectra
-        - Try normalizing data
-        
-        ## 💡 Tips
-        
-        1. **Color assignment** - Use distinct colors for easy identification
-        2. **Offset step** - Adjust to prevent spectra overlap
-        3. **Normalization** - Try different methods for best results
-        4. **X-axis ranges** - Focus on regions of interest
-        5. **Peak width** - Adjust based on peak sharpness
-        6. **Save plots** - Use download buttons for publication-ready figures
-        
-        ## ⚡ Keyboard Shortcuts
-        
-        - **Ctrl+Enter** - Run analysis
-        - **Tab** - Navigate between tabs
-        - **Space** - Toggle checkboxes
-        
-        ## 📤 Export Options
-        
-        - **Raw Data** - CSV with all spectra
-        - **Normalized Data** - CSV with normalized spectra
-        - **Peak Analysis** - CSV with peak parameters
-        - **Plots** - PNG (600 dpi, high quality)
-        - **Session Info** - TXT with all settings
-        
-        ## 🤝 Support
-        
-        For issues or feature requests, please contact support.
-        
-        ## 📄 License
-        
-        SpectrAnalys v2.0 - Scientific Spectroscopic Analysis Platform
-        """)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Export options section
-        st.markdown("---")
-        st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-        st.subheader("📤 Data Export")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-        if filtered_spectra:
-            export_data = pd.DataFrame()
-            for name, spec in filtered_spectra.items():
-                data = spec['data']
-                temp_df = pd.DataFrame({
-                    f"{name.replace('.txt', '')}_x": data['x'].values,
-                    f"{name.replace('.txt', '')}_y": data['y'].values
-                })
-                if export_data.empty:
-                    export_data = temp_df
-                else:
-                    export_data = pd.concat([export_data, temp_df], axis=1)
-            
-            csv = export_data.to_csv(index=False)
-            st.download_button(
-                label="📥 Export Raw Data (CSV)",
-                data=csv,
-                file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        
-        with col2:
-        if filtered_spectra:
-            export_norm = pd.DataFrame()
-            for name, spec in filtered_spectra.items():
-                data = spec['data']
-                y_norm = normalize_spectrum(
-                    data['x'].values, 
-                    data['y'].values, 
-                    norm_method, 
-                    norm_range,
-                    x_ranges
-                )
-                temp_df = pd.DataFrame({
-                    f"{name.replace('.txt', '')}_x": data['x'].values,
-                    f"{name.replace('.txt', '')}_y_norm": y_norm
-                })
-                if export_norm.empty:
-                    export_norm = temp_df
-                else:
-                    export_norm = pd.concat([export_norm, temp_df], axis=1)
-            
-            csv_norm = export_norm.to_csv(index=False)
-            st.download_button(
-                label="📥 Export Normalized Data (CSV)",
-                data=csv_norm,
-                file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        
-        with col3:
-        session_info = f"""SpectrAnalys Analysis Session
-        Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        Spectra Files: {', '.join(ordered_spectra)}
-        Normalization Method: {norm_method}
-        X-axis Ranges: {x_ranges if x_ranges else 'Full range'}
-        Raw Offset Step: {raw_offset_step}
-        Normalized Offset Step: {norm_offset_step}
-        Fill Area: {fill_area}
-        Fill Transparency: {fill_alpha}
-        Subtract Minimum Intensity: {subtract_min_intensity}
-        Grid Enabled: {show_grid}
-        Line Width: {line_width}
-        Peak Analysis: {analyze_peaks_flag}
-        Correlation Analysis: {param_correlation}
-        Filtering: {filter_method}
-        Baseline Correction: {baseline_correction}
-        Second Derivative: {show_second_derivative}
-        Interactive Plots: {interactive_plots}
-        """
+        csv = export_data.to_csv(index=False)
         st.download_button(
-            label="📄 Export Session Info",
-            data=session_info,
-            file_name=f"spectranalys_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            mime="text/plain"
+            label="📥 Export Raw Data (CSV)",
+            data=csv,
+            file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
         )
+    
+    with col2:
+    if filtered_spectra:
+        export_norm = pd.DataFrame()
+        for name, spec in filtered_spectra.items():
+            data = spec['data']
+            y_norm = normalize_spectrum(
+                data['x'].values, 
+                data['y'].values, 
+                norm_method, 
+                norm_range,
+                x_ranges
+            )
+            temp_df = pd.DataFrame({
+                f"{name.replace('.txt', '')}_x": data['x'].values,
+                f"{name.replace('.txt', '')}_y_norm": y_norm
+            })
+            if export_norm.empty:
+                export_norm = temp_df
+            else:
+                export_norm = pd.concat([export_norm, temp_df], axis=1)
         
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        else:
-        # Welcome screen with instructions
-        st.markdown("## 🎯 Welcome to SpectrAnalys")
-        st.markdown("Advanced spectroscopic data analysis platform for researchers and scientists")
-        
-        st.markdown("### 📖 Quick Start Guide:")
-        st.markdown("""
-        1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
-        2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
-        3. **Visualize** - Explore combined spectra visualization with multiple display modes
-        4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
-        5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
-        6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
-        7. **Multivariate Analysis** - Perform PCA and cluster analysis to identify patterns
-        8. **Statistical Analysis** - Compare peak parameters across groups
-        9. **Export Results** - Download processed data, plots, and analysis results
-        """)
-        
-        st.markdown("### ✨ Key Features:")
-        st.markdown("""
-        - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
-        - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
-        - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
-        - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
-        - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
-        - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
-        - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
-        - 📊 **PCA & Cluster Analysis** - Multivariate analysis for pattern detection
-        - 📈 **Statistical Tests** - T-test, ANOVA, Mann-Whitney U tests for group comparison
-        - 📐 **Signal Processing** - Savitzky-Golay filtering, baseline correction, second derivative
-        - 🔄 **Interactive Plots** - Plotly-based interactive visualization with zoom and hover
-        - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
-        - 📚 **Comprehensive Documentation** - Detailed guides for all features
-        """)
-        
-        st.markdown("### 📁 File Format:")
-        st.markdown("Your .txt files should contain two columns separated by tabs:")
-        st.code("""
-        100.5    1250.3
-        101.2    1248.7
-        102.0    1251.5
-        ...
-        """, language="text")
-        
-        st.markdown("**Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!**")
-        
-        # Footer
-        st.markdown("""
-        <div class="footer">
-        <p>🔬 SpectrAnalys v2.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
-        <p style="font-size: 0.75rem;">© 2024 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if __name__ == "__main__":
-        main()
+        csv_norm = export_norm.to_csv(index=False)
+        st.download_button(
+            label="📥 Export Normalized Data (CSV)",
+            data=csv_norm,
+            file_name=f"normalized_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    with col3:
+    session_info = f"""SpectrAnalys Analysis Session
+    Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    Spectra Files: {', '.join(ordered_spectra)}
+    Normalization Method: {norm_method}
+    X-axis Ranges: {x_ranges if x_ranges else 'Full range'}
+    Raw Offset Step: {raw_offset_step}
+    Normalized Offset Step: {norm_offset_step}
+    Fill Area: {fill_area}
+    Fill Transparency: {fill_alpha}
+    Subtract Minimum Intensity: {subtract_min_intensity}
+    Grid Enabled: {show_grid}
+    Line Width: {line_width}
+    Peak Analysis: {analyze_peaks_flag}
+    Correlation Analysis: {param_correlation}
+    Filtering: {filter_method}
+    Baseline Correction: {baseline_correction}
+    Second Derivative: {show_second_derivative}
+    Interactive Plots: {interactive_plots}
+    """
+    st.download_button(
+        label="📄 Export Session Info",
+        data=session_info,
+        file_name=f"spectranalys_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        mime="text/plain"
+    )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    else:
+    # Welcome screen with instructions
+    st.markdown("## 🎯 Welcome to SpectrAnalys")
+    st.markdown("Advanced spectroscopic data analysis platform for researchers and scientists")
+    
+    st.markdown("### 📖 Quick Start Guide:")
+    st.markdown("""
+    1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
+    2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
+    3. **Visualize** - Explore combined spectra visualization with multiple display modes
+    4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
+    5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
+    6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
+    7. **Multivariate Analysis** - Perform PCA and cluster analysis to identify patterns
+    8. **Statistical Analysis** - Compare peak parameters across groups
+    9. **Export Results** - Download processed data, plots, and analysis results
+    """)
+    
+    st.markdown("### ✨ Key Features:")
+    st.markdown("""
+    - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
+    - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
+    - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
+    - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
+    - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
+    - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
+    - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
+    - 📊 **PCA & Cluster Analysis** - Multivariate analysis for pattern detection
+    - 📈 **Statistical Tests** - T-test, ANOVA, Mann-Whitney U tests for group comparison
+    - 📐 **Signal Processing** - Savitzky-Golay filtering, baseline correction, second derivative
+    - 🔄 **Interactive Plots** - Plotly-based interactive visualization with zoom and hover
+    - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
+    - 📚 **Comprehensive Documentation** - Detailed guides for all features
+    """)
+    
+    st.markdown("### 📁 File Format:")
+    st.markdown("Your .txt files should contain two columns separated by tabs:")
+    st.code("""
+    100.5    1250.3
+    101.2    1248.7
+    102.0    1251.5
+    ...
+    """, language="text")
+    
+    st.markdown("**Ready to analyze your spectra? 👈 Upload your files using the sidebar to get started!**")
+    
+    # Footer
+    st.markdown("""
+    <div class="footer">
+    <p>🔬 SpectrAnalys v2.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
+    <p style="font-size: 0.75rem;">© 2024 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if __name__ == "__main__":
+    main()
