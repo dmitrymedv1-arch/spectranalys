@@ -1316,7 +1316,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     ax.set_ylabel(x_label, fontsize=18, fontweight='bold')
     
     # Improve tick formatting
-    ax.tick_params(direction='in', length=8, width=1)
+    ax.tick_params(direction='in', length=5, width=1, labelsize=12)
     
     # Apply grid settings based on show_grid parameter
     if show_grid:
