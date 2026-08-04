@@ -25,7 +25,7 @@ if 'peak_analysis_triggered' not in st.session_state:
     st.session_state.peak_analysis_triggered = False
 if 'peak_analysis_results' not in st.session_state:
     st.session_state.peak_analysis_results = None
-if 'peak_analysis_x_range' not in st.session_state:
+if 'peak_analysis_x_range' not in st.session_state:а
     st.session_state.peak_analysis_x_range = (None, None)
 if 'correlation_ready' not in st.session_state:
     st.session_state.correlation_ready = False
@@ -1626,7 +1626,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
     
     # Get y-limits for text placement at top
     y_min, y_max = ax.get_ylim()
-    y_text_position = y_max + (y_max - y_min) * 0.02  # Position above top edge
+    y_text_position = y_max + (y_max - y_min) * 0.08  # Position above top edge
     
     # Draw all markers
     for marker in markers:
