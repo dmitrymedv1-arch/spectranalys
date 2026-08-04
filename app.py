@@ -1264,7 +1264,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     
     # Add colorbar with custom ticks showing min and max values
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label(colorbar_label, fontsize=14, fontweight='bold')
+    cbar.set_label(colorbar_label, fontsize=18, fontweight='bold')
     
     # Определяем количество делений (5-7 всего, включая min и max)
     n_ticks = 6  # 4 промежуточных + min + max = 6
@@ -1295,7 +1295,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     # Устанавливаем деления на цветовой шкале
     cbar.set_ticks(tick_positions)
     cbar.set_ticklabels(tick_labels)
-    cbar.ax.tick_params(labelsize=12)
+    cbar.ax.tick_params(labelsize=15)
     
     # Добавляем рамку вокруг цветовой шкалы для лучшей читаемости
     cbar.ax.spines['top'].set_visible(True)
@@ -1312,9 +1312,8 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     cbar.ax.spines['right'].set_linewidth(0.5)
     
     # Set labels
-    ax.set_xlabel(y_label, fontsize=14, fontweight='bold')
-    ax.set_ylabel(x_label, fontsize=14, fontweight='bold')
-    ax.set_title(title, fontsize=16, fontweight='bold')
+    ax.set_xlabel(y_label, fontsize=18, fontweight='bold')
+    ax.set_ylabel(x_label, fontsize=18, fontweight='bold')
     
     # Improve tick formatting
     ax.tick_params(direction='in', length=5, width=1)
