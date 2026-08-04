@@ -1768,8 +1768,8 @@ def main():
                         heatmap_params_temp[name] = st.number_input(
                             f"{display_name}",
                             value=st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0),
-                            step=0.1,
-                            format="%.1f",
+                            step=0.01,
+                            format="%.2f",
                             key=param_key
                         )
                     
