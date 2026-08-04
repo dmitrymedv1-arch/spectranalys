@@ -3040,40 +3040,18 @@ def main():
                 st.markdown("---")
                 st.markdown("#### ✏️ Add New Marker")
                 
-                # Check if we're in region mode (after line is added)
-                col1, col2 = st.columns(2)
-                with col1:
-                    # Position slider
-                    marker_position = st.slider(
-                        "Marker position (X value)",
-                        min_value=global_min_x,
-                        max_value=global_max_x,
-                        value=(global_min_x + global_max_x) / 2,
-                        step=(global_max_x - global_min_x) / 500,
-                        key="marker_position_slider"
-                    )
-                    # Update preview position
-                    st.session_state.spectral_markers_preview_position = marker_position
+                # Get global x range for sliders
+                all_x = []
+                for spec in selected_spectra.values():
+                    all_x.extend(spec['data']['x'].values)
+                if all_x:
+                    global_min_x = float(np.min(all_x))
+                    global_max_x = float(np.max(all_x))
+                else:
+                    st.warning("No data available in selected spectra")
+                    st.stop()
                 
-                with col2:
-                    # Color picker for new marker
-                    marker_color = st.color_picker(
-                        "Marker color",
-                        value=st.session_state.spectral_markers_temp_color,
-                        key="marker_color_picker"
-                    )
-                    st.session_state.spectral_markers_temp_color = marker_color
-                
-                # Name input
-                marker_name = st.text_input(
-                    "Marker name (optional)",
-                    value=st.session_state.spectral_markers_temp_name,
-                    placeholder="e.g., I, Peak 1, Marker A",
-                    key="marker_name_input"
-                )
-                st.session_state.spectral_markers_temp_name = marker_name
-                
-                # Check if we have a pending line to expand to region
+                # Check if there's a pending line to convert to region
                 pending_line = None
                 for marker in st.session_state.spectral_markers:
                     if marker.get('pending', False):
@@ -3081,28 +3059,69 @@ def main():
                         break
                 
                 if pending_line is None:
-                    # Show "Add Line" button
+                    # --- LINE MODE ---
+                    st.info("📍 **Step 1: Add a vertical line**")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        # Position slider for line
+                        marker_position = st.slider(
+                            "Line position (X value)",
+                            min_value=global_min_x,
+                            max_value=global_max_x,
+                            value=(global_min_x + global_max_x) / 2,
+                            step=(global_max_x - global_min_x) / 500,
+                            key="marker_position_slider"
+                        )
+                        # Update preview position
+                        st.session_state.spectral_markers_preview_position = marker_position
+                    
+                    with col2:
+                        # Color picker for new marker
+                        marker_color = st.color_picker(
+                            "Marker color",
+                            value=st.session_state.spectral_markers_temp_color,
+                            key="marker_color_picker"
+                        )
+                        st.session_state.spectral_markers_temp_color = marker_color
+                    
+                    # Name input
+                    marker_name = st.text_input(
+                        "Marker name (optional)",
+                        value=st.session_state.spectral_markers_temp_name,
+                        placeholder="e.g., I, Peak 1, Marker A",
+                        key="marker_name_input"
+                    )
+                    st.session_state.spectral_markers_temp_name = marker_name
+                    
+                    # Add Line button
                     if st.button("➕ Add Line", use_container_width=True):
-                        # Add a new line marker
+                        # Add a new line marker with pending=True to enable region expansion
                         new_marker = {
                             'type': 'line',
                             'position': marker_position,
                             'width': 0,
                             'name': marker_name if marker_name else "",
                             'color': marker_color,
-                            'pending': False
+                            'pending': True  # This line is pending for region expansion
                         }
                         st.session_state.spectral_markers.append(new_marker)
                         st.session_state.spectral_markers_temp_name = ""
-                        st.success(f"✅ Line added at position {marker_position:.1f}")
+                        st.success(f"✅ Line added at position {marker_position:.1f}. Now you can expand it to a region!")
                         st.rerun()
+                    
+                    # Display info about existing markers
+                    if st.session_state.spectral_markers:
+                        st.info(f"ℹ️ You have {len([m for m in st.session_state.spectral_markers if not m.get('pending', False)])} confirmed markers. Add a new line above.")
+                
                 else:
-                    # We have a pending line, show region expansion
-                    st.info(f"💡 Expanding line at position {pending_line['position']:.1f} to a region")
+                    # --- REGION MODE ---
+                    st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region**")
+                    st.markdown("*Use the slider below to set the region width (half-width on each side)*")
                     
                     # Width slider for region
                     region_width = st.slider(
-                        "Region width (half-width)",
+                        "Region half-width",
                         min_value=0.1,
                         max_value=(global_max_x - global_min_x) / 4,
                         value=min(5.0, (global_max_x - global_min_x) / 20),
@@ -3120,18 +3139,23 @@ def main():
                                     st.session_state.spectral_markers[i]['type'] = 'region'
                                     st.session_state.spectral_markers[i]['width'] = region_width
                                     st.session_state.spectral_markers[i]['pending'] = False
-                                    st.success(f"✅ Region added at position {marker['position']:.1f} with width {region_width:.1f}")
+                                    st.success(f"✅ Region added: center={marker['position']:.1f}, half-width={region_width:.1f}")
                                     st.session_state.spectral_markers_preview_width = 0
                                     st.rerun()
                                     break
                     
                     with col2:
                         if st.button("❌ Cancel Region", use_container_width=True):
-                            # Remove the pending marker
-                            st.session_state.spectral_markers = [m for m in st.session_state.spectral_markers if not m.get('pending', False)]
-                            st.session_state.spectral_markers_preview_width = 0
-                            st.warning("⛔ Region creation cancelled")
-                            st.rerun()
+                            # Remove the pending marker (keep it as a line or remove completely?)
+                            # Let's keep it as a line (remove pending flag, keep as line)
+                            for i, marker in enumerate(st.session_state.spectral_markers):
+                                if marker.get('pending', False):
+                                    st.session_state.spectral_markers[i]['pending'] = False
+                                    st.session_state.spectral_markers[i]['type'] = 'line'
+                                    st.info(f"⏹️ Line kept at position {marker['position']:.1f} (not expanded to region)")
+                                    st.session_state.spectral_markers_preview_width = 0
+                                    st.rerun()
+                                    break
                 
                 # --- Display and manage existing markers ---
                 if st.session_state.spectral_markers:
