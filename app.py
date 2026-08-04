@@ -25,7 +25,7 @@ if 'peak_analysis_triggered' not in st.session_state:
     st.session_state.peak_analysis_triggered = False
 if 'peak_analysis_results' not in st.session_state:
     st.session_state.peak_analysis_results = None
-if 'peak_analysis_x_range' not in st.session_state:а
+if 'peak_analysis_x_range' not in st.session_state:
     st.session_state.peak_analysis_x_range = (None, None)
 if 'correlation_ready' not in st.session_state:
     st.session_state.correlation_ready = False
