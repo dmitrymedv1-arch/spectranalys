@@ -2969,6 +2969,7 @@ def main():
             
             st.markdown('</div>', unsafe_allow_html=True)
         
+
         # NEW TAB 5: Spectral Markers
         with tab5:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3050,69 +3051,7 @@ def main():
                         pending_line = marker
                         break
                 
-                # --- PLOT WITH MARKERS (MOVED TO TOP) ---
-                st.markdown("---")
-                st.markdown("#### 📊 Plot with Markers")
-                
-                # Show global options for the plot
-                col1, col2 = st.columns(2)
-                with col1:
-                    show_values = st.checkbox(
-                        "Show X values on plot",
-                        value=st.session_state.spectral_markers_show_values,
-                        key="markers_show_values"
-                    )
-                    st.session_state.spectral_markers_show_values = show_values
-                
-                with col2:
-                    # Show/hide preview checkbox
-                    show_preview = st.checkbox(
-                        "Show preview line/region (during editing)",
-                        value=st.session_state.spectral_markers_show_preview,
-                        key="markers_show_preview"
-                    )
-                    st.session_state.spectral_markers_show_preview = show_preview
-                    if not show_preview:
-                        st.caption("🔒 Preview hidden. All markers are confirmed.")
-                
-                # Create the plot
-                fig_markers = create_spectral_markers_plot(
-                    selected_spectra, x_label, selected_yl,
-                    selected_offset_step, selected_fill, selected_normalized,
-                    selected_use_offset, x_ranges, subtract_min_intensity,
-                    fill_alpha, show_grid, line_width, fig_width, fig_height,
-                    cached['legend_fontsize'], cached['legend_position'],
-                    cached['legend_offset'],
-                    st.session_state.spectral_markers,
-                    st.session_state.spectral_markers_preview_position,
-                    st.session_state.spectral_markers_preview_width,
-                    st.session_state.spectral_markers_show_values,
-                    pending_line is not None,
-                    st.session_state.spectral_markers_show_preview
-                )
-                
-                # Display the plot
-                st.pyplot(fig_markers)
-                
-                # Download button for the plot
-                buf = BytesIO()
-                fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
-                buf.seek(0)
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                st.markdown(f"""
-                <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-                    <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
-                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                       color: white; border: none; border-radius: 8px; 
-                                       padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
-                            📥 Download Plot with Markers (PNG, 600 dpi)
-                        </button>
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
-                plt.close(fig_markers)
-                
-                # --- Add New Marker Section ---
+                # --- Add New Marker Section (FIRST) ---
                 st.markdown("---")
                 st.markdown("#### ✏️ Add New Marker")
                 
@@ -3215,7 +3154,69 @@ def main():
                                     st.rerun()
                                     break
                 
-                # --- Display and manage existing markers ---
+                # --- PLOT WITH MARKERS (SECOND) ---
+                st.markdown("---")
+                st.markdown("#### 📊 Plot with Markers")
+                
+                # Show global options for the plot
+                col1, col2 = st.columns(2)
+                with col1:
+                    show_values = st.checkbox(
+                        "Show X values on plot",
+                        value=st.session_state.spectral_markers_show_values,
+                        key="markers_show_values"
+                    )
+                    st.session_state.spectral_markers_show_values = show_values
+                
+                with col2:
+                    # Show/hide preview checkbox
+                    show_preview = st.checkbox(
+                        "Show preview line/region (during editing)",
+                        value=st.session_state.spectral_markers_show_preview,
+                        key="markers_show_preview"
+                    )
+                    st.session_state.spectral_markers_show_preview = show_preview
+                    if not show_preview:
+                        st.caption("🔒 Preview hidden. All markers are confirmed.")
+                
+                # Create the plot
+                fig_markers = create_spectral_markers_plot(
+                    selected_spectra, x_label, selected_yl,
+                    selected_offset_step, selected_fill, selected_normalized,
+                    selected_use_offset, x_ranges, subtract_min_intensity,
+                    fill_alpha, show_grid, line_width, fig_width, fig_height,
+                    cached['legend_fontsize'], cached['legend_position'],
+                    cached['legend_offset'],
+                    st.session_state.spectral_markers,
+                    st.session_state.spectral_markers_preview_position,
+                    st.session_state.spectral_markers_preview_width,
+                    st.session_state.spectral_markers_show_values,
+                    pending_line is not None,
+                    st.session_state.spectral_markers_show_preview
+                )
+                
+                # Display the plot
+                st.pyplot(fig_markers)
+                
+                # Download button for the plot
+                buf = BytesIO()
+                fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                buf.seek(0)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                st.markdown(f"""
+                <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+                    <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                       color: white; border: none; border-radius: 8px; 
+                                       padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                            📥 Download Plot with Markers (PNG, 600 dpi)
+                        </button>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+                plt.close(fig_markers)
+                
+                # --- Display and manage existing markers (THIRD) ---
                 if st.session_state.spectral_markers:
                     st.markdown("---")
                     st.markdown("#### 📋 Existing Markers")
