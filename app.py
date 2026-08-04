@@ -1625,8 +1625,12 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
     y_min, y_max = ax.get_ylim()
     y_text_position = y_max + (y_max - y_min) * 0.02  # Position above top edge
     
-    # Draw all markers
+    # Draw all confirmed markers (non-pending)
     for marker in markers:
+        # Skip pending markers - they are shown as preview
+        if marker.get('pending', False):
+            continue
+            
         marker_type = marker.get('type', 'line')
         position = marker.get('position')
         width = marker.get('width', 0)
@@ -1666,10 +1670,12 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                        color=color, fontweight='bold',
                        rotation=45, rotation_mode='anchor')
     
-    # Draw preview line/region
-    if preview_position is not None:
+    # Draw preview line/region ONLY if there's a pending marker (we are in the process of adding)
+    has_pending = any(m.get('pending', False) for m in markers)
+    
+    if preview_position is not None and has_pending:
         if is_region_mode and preview_width > 0:
-            # Preview region
+            # Preview region (only shown when adding)
             half_width = preview_width / 2
             x_start = preview_position - half_width
             x_end = preview_position + half_width
@@ -1686,7 +1692,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                        color='gray', fontweight='bold', alpha=0.7,
                        rotation=45, rotation_mode='anchor')
         else:
-            # Preview line
+            # Preview line (only shown when adding)
             ax.axvline(x=preview_position, color='gray', linestyle='-.', linewidth=1.0, alpha=0.5)
             
             # Add preview text if show_x_values is enabled
@@ -3411,7 +3417,7 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
     st.markdown("""
     <div class="footer">
         <p>🔬 SpectrAnalys v2.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
-        <p style="font-size: 0.75rem;">© 2024 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
+        <p style="font-size: 0.75rem;">© 2026 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
     </div>
     """, unsafe_allow_html=True)
 
