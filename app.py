@@ -1642,7 +1642,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
         
         if marker_type == 'line':
             # Draw vertical line
-            ax.axvline(x=position, color=color, linestyle='--', linewidth=1.2, alpha=1.0)
+            ax.axvline(x=position, color=color, linestyle='--', linewidth=0.6, alpha=1.0)
             
             # Add text label above top edge if show_x_values is enabled
             if show_x_values:
@@ -1660,10 +1660,10 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
             ax.axvspan(x_start, x_end, alpha=0.3, color=color)
             
             # Draw boundary lines
-            ax.axvline(x=x_start, color=color, linestyle='--', linewidth=0.8, alpha=0.7)
-            ax.axvline(x=x_end, color=color, linestyle='--', linewidth=0.8, alpha=0.7)
+            ax.axvline(x=x_start, color=color, linestyle='--', linewidth=0.4, alpha=0.7)
+            ax.axvline(x=x_end, color=color, linestyle='--', linewidth=0.4, alpha=0.7)
             # Draw center line
-            ax.axvline(x=position, color=color, linestyle='--', linewidth=1.0, alpha=0.5)
+            ax.axvline(x=position, color=color, linestyle='--', linewidth=0.5, alpha=0.5)
             
             # Add text label above top edge if show_x_values is enabled
             if show_x_values:
