@@ -3046,17 +3046,6 @@ def main():
                 st.markdown("---")
                 st.markdown("#### ✏️ Add New Marker")
                 
-                # Get global x range for sliders
-                all_x = []
-                for spec in selected_spectra.values():
-                    all_x.extend(spec['data']['x'].values)
-                if all_x:
-                    global_min_x = float(np.min(all_x))
-                    global_max_x = float(np.max(all_x))
-                else:
-                    st.warning("No data available in selected spectra")
-                    st.stop()
-                
                 # Check if there's a pending line to convert to region
                 pending_line = None
                 for marker in st.session_state.spectral_markers:
@@ -3064,41 +3053,47 @@ def main():
                         pending_line = marker
                         break
                 
+                # Get current marker position from slider (always update preview)
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Position slider for line/region
+                    marker_position = st.slider(
+                        "Marker position (X value)",
+                        min_value=global_min_x,
+                        max_value=global_max_x,
+                        value=(global_min_x + global_max_x) / 2,
+                        step=(global_max_x - global_min_x) / 500,
+                        key="marker_position_slider"
+                    )
+                    # ALWAYS update preview position, even without pending marker
+                    st.session_state.spectral_markers_preview_position = marker_position
+                
+                with col2:
+                    # Color picker for new marker
+                    marker_color = st.color_picker(
+                        "Marker color",
+                        value=st.session_state.spectral_markers_temp_color,
+                        key="marker_color_picker"
+                    )
+                    st.session_state.spectral_markers_temp_color = marker_color
+                
+                # Name input
+                marker_name = st.text_input(
+                    "Marker name (optional)",
+                    value=st.session_state.spectral_markers_temp_name,
+                    placeholder="e.g., I, Peak 1, Marker A",
+                    key="marker_name_input"
+                )
+                st.session_state.spectral_markers_temp_name = marker_name
+                
+                # Flag to indicate we're in preview mode (always true if slider is moved)
+                # We'll use a separate flag for preview that's always True when slider exists
+                is_preview_active = True  # Always show preview when slider is present
+                
                 if pending_line is None:
                     # --- LINE MODE ---
                     st.info("📍 **Step 1: Add a vertical line**")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        # Position slider for line
-                        marker_position = st.slider(
-                            "Line position (X value)",
-                            min_value=global_min_x,
-                            max_value=global_max_x,
-                            value=(global_min_x + global_max_x) / 2,
-                            step=(global_max_x - global_min_x) / 500,
-                            key="marker_position_slider"
-                        )
-                        # Update preview position
-                        st.session_state.spectral_markers_preview_position = marker_position
-                    
-                    with col2:
-                        # Color picker for new marker
-                        marker_color = st.color_picker(
-                            "Marker color",
-                            value=st.session_state.spectral_markers_temp_color,
-                            key="marker_color_picker"
-                        )
-                        st.session_state.spectral_markers_temp_color = marker_color
-                    
-                    # Name input
-                    marker_name = st.text_input(
-                        "Marker name (optional)",
-                        value=st.session_state.spectral_markers_temp_name,
-                        placeholder="e.g., I, Peak 1, Marker A",
-                        key="marker_name_input"
-                    )
-                    st.session_state.spectral_markers_temp_name = marker_name
+                    st.caption("Move the slider above to preview the line position on the plot")
                     
                     # Add Line button
                     if st.button("➕ Add Line", use_container_width=True):
@@ -3118,12 +3113,15 @@ def main():
                     
                     # Display info about existing markers
                     if st.session_state.spectral_markers:
-                        st.info(f"ℹ️ You have {len([m for m in st.session_state.spectral_markers if not m.get('pending', False)])} confirmed markers. Add a new line above.")
+                        confirmed = [m for m in st.session_state.spectral_markers if not m.get('pending', False)]
+                        if confirmed:
+                            st.info(f"ℹ️ You have {len(confirmed)} confirmed markers. Add a new line above.")
                 
                 else:
                     # --- REGION MODE ---
                     st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region**")
                     st.markdown("*Use the slider below to set the region width (half-width on each side)*")
+                    st.caption("Move the slider to preview the region on the plot")
                     
                     # Width slider for region
                     region_width = st.slider(
@@ -3152,8 +3150,7 @@ def main():
                     
                     with col2:
                         if st.button("❌ Cancel Region", use_container_width=True):
-                            # Remove the pending marker (keep it as a line or remove completely?)
-                            # Let's keep it as a line (remove pending flag, keep as line)
+                            # Remove the pending marker (keep it as a line)
                             for i, marker in enumerate(st.session_state.spectral_markers):
                                 if marker.get('pending', False):
                                     st.session_state.spectral_markers[i]['pending'] = False
@@ -3239,6 +3236,11 @@ def main():
                 st.markdown("---")
                 st.markdown("#### 📊 Plot with Markers")
                 
+                # Determine if we should show preview (always True when slider is present)
+                # We show preview if there's a pending marker OR if we're in line mode (no pending)
+                has_pending = any(m.get('pending', False) for m in st.session_state.spectral_markers)
+                show_preview = True  # Always show preview when slider exists
+                
                 # Create the plot
                 fig_markers = create_spectral_markers_plot(
                     selected_spectra, x_label, selected_yl,
@@ -3251,7 +3253,7 @@ def main():
                     st.session_state.spectral_markers_preview_position,
                     st.session_state.spectral_markers_preview_width,
                     st.session_state.spectral_markers_show_values,
-                    pending_line is not None
+                    has_pending  # is_region_mode = True only if there's a pending marker
                 )
                 
                 # Display the plot
