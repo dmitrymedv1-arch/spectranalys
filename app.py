@@ -3043,10 +3043,6 @@ def main():
                     st.warning("No data available in selected spectra")
                     st.stop()
                 
-                # --- Marker Management Section ---
-                st.markdown("---")
-                st.markdown("#### ✏️ Add New Marker")
-                
                 # Check if there's a pending line to convert to region
                 pending_line = None
                 for marker in st.session_state.spectral_markers:
@@ -3054,47 +3050,107 @@ def main():
                         pending_line = marker
                         break
                 
-                # Get current marker position from slider (always update preview)
+                # --- PLOT WITH MARKERS (MOVED TO TOP) ---
+                st.markdown("---")
+                st.markdown("#### 📊 Plot with Markers")
+                
+                # Show global options for the plot
                 col1, col2 = st.columns(2)
                 with col1:
-                    # Position slider for line/region
-                    marker_position = st.slider(
-                        "Marker position (X value)",
-                        min_value=global_min_x,
-                        max_value=global_max_x,
-                        value=(global_min_x + global_max_x) / 2,
-                        step=(global_max_x - global_min_x) / 500,
-                        key="marker_position_slider"
+                    show_values = st.checkbox(
+                        "Show X values on plot",
+                        value=st.session_state.spectral_markers_show_values,
+                        key="markers_show_values"
                     )
-                    # ALWAYS update preview position, even without pending marker
-                    st.session_state.spectral_markers_preview_position = marker_position
+                    st.session_state.spectral_markers_show_values = show_values
                 
                 with col2:
-                    # Color picker for new marker
-                    marker_color = st.color_picker(
-                        "Marker color",
-                        value=st.session_state.spectral_markers_temp_color,
-                        key="marker_color_picker"
+                    # Show/hide preview checkbox
+                    show_preview = st.checkbox(
+                        "Show preview line/region (during editing)",
+                        value=st.session_state.spectral_markers_show_preview,
+                        key="markers_show_preview"
                     )
-                    st.session_state.spectral_markers_temp_color = marker_color
+                    st.session_state.spectral_markers_show_preview = show_preview
+                    if not show_preview:
+                        st.caption("🔒 Preview hidden. All markers are confirmed.")
                 
-                # Name input
-                marker_name = st.text_input(
-                    "Marker name (optional)",
-                    value=st.session_state.spectral_markers_temp_name,
-                    placeholder="e.g., I, Peak 1, Marker A",
-                    key="marker_name_input"
+                # Create the plot
+                fig_markers = create_spectral_markers_plot(
+                    selected_spectra, x_label, selected_yl,
+                    selected_offset_step, selected_fill, selected_normalized,
+                    selected_use_offset, x_ranges, subtract_min_intensity,
+                    fill_alpha, show_grid, line_width, fig_width, fig_height,
+                    cached['legend_fontsize'], cached['legend_position'],
+                    cached['legend_offset'],
+                    st.session_state.spectral_markers,
+                    st.session_state.spectral_markers_preview_position,
+                    st.session_state.spectral_markers_preview_width,
+                    st.session_state.spectral_markers_show_values,
+                    pending_line is not None,
+                    st.session_state.spectral_markers_show_preview
                 )
-                st.session_state.spectral_markers_temp_name = marker_name
                 
-                # Flag to indicate we're in preview mode (always true if slider is moved)
-                # We'll use a separate flag for preview that's always True when slider exists
-                is_preview_active = True  # Always show preview when slider is present
+                # Display the plot
+                st.pyplot(fig_markers)
+                
+                # Download button for the plot
+                buf = BytesIO()
+                fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                buf.seek(0)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                st.markdown(f"""
+                <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+                    <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                       color: white; border: none; border-radius: 8px; 
+                                       padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                            📥 Download Plot with Markers (PNG, 600 dpi)
+                        </button>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+                plt.close(fig_markers)
+                
+                # --- Add New Marker Section ---
+                st.markdown("---")
+                st.markdown("#### ✏️ Add New Marker")
                 
                 if pending_line is None:
                     # --- LINE MODE ---
                     st.info("📍 **Step 1: Add a vertical line**")
-                    st.caption("Move the slider above to preview the line position on the plot")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        # Position slider for line
+                        marker_position = st.slider(
+                            "Line position (X value)",
+                            min_value=global_min_x,
+                            max_value=global_max_x,
+                            value=(global_min_x + global_max_x) / 2,
+                            step=(global_max_x - global_min_x) / 500,
+                            key="marker_position_slider"
+                        )
+                        # Update preview position
+                        st.session_state.spectral_markers_preview_position = marker_position
+                    
+                    with col2:
+                        # Color picker for new marker
+                        marker_color = st.color_picker(
+                            "Marker color",
+                            value=st.session_state.spectral_markers_temp_color,
+                            key="marker_color_picker"
+                        )
+                        st.session_state.spectral_markers_temp_color = marker_color
+                    
+                    # Name input
+                    marker_name = st.text_input(
+                        "Marker name (optional)",
+                        value=st.session_state.spectral_markers_temp_name,
+                        placeholder="e.g., I, Peak 1, Marker A",
+                        key="marker_name_input"
+                    )
+                    st.session_state.spectral_markers_temp_name = marker_name
                     
                     # Add Line button
                     if st.button("➕ Add Line", use_container_width=True):
@@ -3114,15 +3170,13 @@ def main():
                     
                     # Display info about existing markers
                     if st.session_state.spectral_markers:
-                        confirmed = [m for m in st.session_state.spectral_markers if not m.get('pending', False)]
-                        if confirmed:
-                            st.info(f"ℹ️ You have {len(confirmed)} confirmed markers. Add a new line above.")
+                        confirmed_count = len([m for m in st.session_state.spectral_markers if not m.get('pending', False)])
+                        st.info(f"ℹ️ You have {confirmed_count} confirmed markers. Add a new line above.")
                 
                 else:
                     # --- REGION MODE ---
                     st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region**")
                     st.markdown("*Use the slider below to set the region width (half-width on each side)*")
-                    st.caption("Move the slider to preview the region on the plot")
                     
                     # Width slider for region
                     region_width = st.slider(
@@ -3166,27 +3220,6 @@ def main():
                     st.markdown("---")
                     st.markdown("#### 📋 Existing Markers")
                     
-                    # Show global options
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        show_values = st.checkbox(
-                            "Show X values on plot",
-                            value=st.session_state.spectral_markers_show_values,
-                            key="markers_show_values"
-                        )
-                        st.session_state.spectral_markers_show_values = show_values
-                    
-                    with col2:
-                        # NEW: Show/hide preview checkbox
-                        show_preview = st.checkbox(
-                            "Show preview line/region (during editing)",
-                            value=st.session_state.spectral_markers_show_preview,
-                            key="markers_show_preview"
-                        )
-                        st.session_state.spectral_markers_show_preview = show_preview
-                        if not show_preview:
-                            st.caption("🔒 Preview hidden. All markers are confirmed.")
-                    
                     # Prepare data for table
                     markers_data = []
                     for i, marker in enumerate(st.session_state.spectral_markers):
@@ -3213,84 +3246,40 @@ def main():
                         # Display markers in a table with delete buttons
                         df_markers = pd.DataFrame(markers_data)
                         
-                        # Create columns for each marker row with delete button
-                        for idx, row in df_markers.iterrows():
-                            col1, col2, col3, col4, col5, col6, col7 = st.columns([1, 1.5, 1, 1, 1.2, 0.8, 0.8])
-                            with col1:
-                                st.write(f"**{row['#']}**")
-                            with col2:
-                                st.write(row['Name'] if row['Name'] else "—")
-                            with col3:
-                                st.write(row['Type'])
-                            with col4:
-                                st.write(row['Position'])
-                            with col5:
-                                st.write(row['Width'])
-                            with col6:
-                                # Color indicator
-                                st.markdown(f"<div style='width:20px;height:20px;background-color:{row['Color']};border:1px solid #ccc;border-radius:3px;'></div>", unsafe_allow_html=True)
-                            with col7:
-                                if st.button("🗑️", key=f"delete_marker_{row['index']}"):
-                                    # Remove marker
-                                    st.session_state.spectral_markers.pop(row['index'])
-                                    st.rerun()
-                        
-                        # Clear all markers button
-                        if st.button("🗑️ Clear All Markers", use_container_width=True):
-                            st.session_state.spectral_markers = []
-                            st.session_state.spectral_markers_preview_position = None
-                            st.session_state.spectral_markers_preview_width = 0
-                            st.rerun()
+                        # Use a container for the table
+                        with st.container():
+                            # Create columns for each marker row with delete button
+                            for idx, row in df_markers.iterrows():
+                                col1, col2, col3, col4, col5, col6, col7 = st.columns([1, 1.5, 1, 1, 1.2, 0.8, 0.8])
+                                with col1:
+                                    st.write(f"**{row['#']}**")
+                                with col2:
+                                    st.write(row['Name'] if row['Name'] else "—")
+                                with col3:
+                                    st.write(row['Type'])
+                                with col4:
+                                    st.write(row['Position'])
+                                with col5:
+                                    st.write(row['Width'])
+                                with col6:
+                                    # Color indicator
+                                    st.markdown(f"<div style='width:20px;height:20px;background-color:{row['Color']};border:1px solid #ccc;border-radius:3px;'></div>", unsafe_allow_html=True)
+                                with col7:
+                                    if st.button("🗑️", key=f"delete_marker_{row['index']}"):
+                                        # Remove marker
+                                        st.session_state.spectral_markers.pop(row['index'])
+                                        st.rerun()
+                            
+                            # Clear all markers button
+                            if st.button("🗑️ Clear All Markers", use_container_width=True):
+                                st.session_state.spectral_markers = []
+                                st.session_state.spectral_markers_preview_position = None
+                                st.session_state.spectral_markers_preview_width = 0
+                                st.rerun()
                     else:
-                        st.info("No markers added yet. Use the controls above to add lines or regions.")
+                        st.info("No confirmed markers yet. Use the controls above to add lines or regions.")
                 else:
                     st.info("No markers added yet. Use the controls above to add lines or regions.")
-                
-                # --- Display the plot with markers ---
-                st.markdown("---")
-                st.markdown("#### 📊 Plot with Markers")
-                
-                # Determine if we should show preview (always True when slider is present)
-                # We show preview if there's a pending marker OR if we're in line mode (no pending)
-                has_pending = any(m.get('pending', False) for m in st.session_state.spectral_markers)
-                show_preview = True  # Always show preview when slider exists
-                
-                # Create the plot
-                fig_markers = create_spectral_markers_plot(
-                    selected_spectra, x_label, selected_yl,
-                    selected_offset_step, selected_fill, selected_normalized,
-                    selected_use_offset, x_ranges, subtract_min_intensity,
-                    fill_alpha, show_grid, line_width, fig_width, fig_height,
-                    cached['legend_fontsize'], cached['legend_position'],
-                    cached['legend_offset'],
-                    st.session_state.spectral_markers,
-                    st.session_state.spectral_markers_preview_position,
-                    st.session_state.spectral_markers_preview_width,
-                    st.session_state.spectral_markers_show_values,
-                    pending_line is not None,
-                    st.session_state.spectral_markers_show_preview  # NEW parameter
-                )
-                
-                # Display the plot
-                st.pyplot(fig_markers)
-                
-                # Download button for the plot
-                buf = BytesIO()
-                fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
-                buf.seek(0)
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                st.markdown(f"""
-                <div style="text-align: center; margin-top: 1rem; margin-bottom: 1rem;">
-                    <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
-                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                       color: white; border: none; border-radius: 8px; 
-                                       padding: 0.5rem 1rem; cursor: pointer; font-size: 1rem;">
-                            📥 Download Plot with Markers (PNG, 600 dpi)
-                        </button>
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
-                plt.close(fig_markers)
                 
             else:
                 st.warning("⚠️ No spectra loaded. Please load spectra in the sidebar first.")
