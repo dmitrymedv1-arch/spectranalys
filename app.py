@@ -83,6 +83,8 @@ if 'spectral_markers_temp_name' not in st.session_state:
     st.session_state.spectral_markers_temp_name = ""
 if 'spectral_markers_temp_color' not in st.session_state:
     st.session_state.spectral_markers_temp_color = '#000000'
+if 'spectral_markers_show_preview' not in st.session_state:
+    st.session_state.spectral_markers_show_preview = True
 
 # Custom CSS for modern scientific design
 st.markdown("""
@@ -1464,13 +1466,14 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
 
 # NEW FUNCTION: Create spectral markers plot
+# NEW FUNCTION: Create spectral markers plot
 def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step, 
                                   fill_area, normalized, use_offset, x_ranges,
                                   subtract_min_intensity, fill_alpha, show_grid,
                                   line_width, fig_width, fig_height, legend_fontsize,
                                   legend_position, legend_offset, markers, 
                                   preview_position, preview_width, show_x_values,
-                                  is_region_mode=False):
+                                  is_region_mode=False, show_preview=True):  # NEW parameter
     """Create plot with spectral markers (lines and regions)"""
     
     # Create the base plot using create_individual_plot but without legend
@@ -1625,9 +1628,9 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
     y_min, y_max = ax.get_ylim()
     y_text_position = y_max + (y_max - y_min) * 0.02  # Position above top edge
     
-    # Draw all confirmed markers (non-pending)
+    # Draw all markers
     for marker in markers:
-        # Skip pending markers - they are shown as preview
+        # Skip pending markers (they are shown as preview instead)
         if marker.get('pending', False):
             continue
             
@@ -1670,12 +1673,10 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                        color=color, fontweight='bold',
                        rotation=45, rotation_mode='anchor')
     
-    # Draw preview line/region ONLY if there's a pending marker (we are in the process of adding)
-    has_pending = any(m.get('pending', False) for m in markers)
-    
-    if preview_position is not None and has_pending:
+    # Draw preview line/region (only if show_preview is True)
+    if show_preview and preview_position is not None:
         if is_region_mode and preview_width > 0:
-            # Preview region (only shown when adding)
+            # Preview region
             half_width = preview_width / 2
             x_start = preview_position - half_width
             x_end = preview_position + half_width
@@ -1692,7 +1693,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                        color='gray', fontweight='bold', alpha=0.7,
                        rotation=45, rotation_mode='anchor')
         else:
-            # Preview line (only shown when adding)
+            # Preview line
             ax.axvline(x=preview_position, color='gray', linestyle='-.', linewidth=1.0, alpha=0.5)
             
             # Add preview text if show_x_values is enabled
@@ -3166,12 +3167,25 @@ def main():
                     st.markdown("#### 📋 Existing Markers")
                     
                     # Show global options
-                    show_values = st.checkbox(
-                        "Show X values on plot",
-                        value=st.session_state.spectral_markers_show_values,
-                        key="markers_show_values"
-                    )
-                    st.session_state.spectral_markers_show_values = show_values
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        show_values = st.checkbox(
+                            "Show X values on plot",
+                            value=st.session_state.spectral_markers_show_values,
+                            key="markers_show_values"
+                        )
+                        st.session_state.spectral_markers_show_values = show_values
+                    
+                    with col2:
+                        # NEW: Show/hide preview checkbox
+                        show_preview = st.checkbox(
+                            "Show preview line/region (during editing)",
+                            value=st.session_state.spectral_markers_show_preview,
+                            key="markers_show_preview"
+                        )
+                        st.session_state.spectral_markers_show_preview = show_preview
+                        if not show_preview:
+                            st.caption("🔒 Preview hidden. All markers are confirmed.")
                     
                     # Prepare data for table
                     markers_data = []
@@ -3253,7 +3267,8 @@ def main():
                     st.session_state.spectral_markers_preview_position,
                     st.session_state.spectral_markers_preview_width,
                     st.session_state.spectral_markers_show_values,
-                    has_pending  # is_region_mode = True only if there's a pending marker
+                    pending_line is not None,
+                    st.session_state.spectral_markers_show_preview  # NEW parameter
                 )
                 
                 # Display the plot
