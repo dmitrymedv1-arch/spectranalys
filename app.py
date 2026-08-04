@@ -77,12 +77,6 @@ if 'spectral_markers_temp_name' not in st.session_state:
     st.session_state.spectral_markers_temp_name = ""
 if 'spectral_markers_mode' not in st.session_state:
     st.session_state.spectral_markers_mode = 'line'  # 'line' or 'area'
-if 'spectral_markers_line_confirmed' not in st.session_state:
-    st.session_state.spectral_markers_line_confirmed = False
-if 'spectral_markers_area_confirmed' not in st.session_state:
-    st.session_state.spectral_markers_area_confirmed = False
-if 'spectral_markers_editing_index' not in st.session_state:
-    st.session_state.spectral_markers_editing_index = -1
 
 # Custom CSS for modern scientific design
 st.markdown("""
@@ -1682,6 +1676,269 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label,
     
     return fig
 
+# NEW FUNCTION: Create spectral markers plot with preview line
+def create_spectral_markers_plot_with_preview(spectra_dict, x_label, y_label, 
+                                              offset_step, fill_area, normalized, use_offset,
+                                              x_ranges, subtract_min_intensity, fill_alpha,
+                                              show_grid, line_width, fig_width, fig_height,
+                                              legend_fontsize, legend_position, legend_offset,
+                                              markers, preview_position, preview_width, preview_mode,
+                                              show_x_values, preview_color):
+    """Create individual plot with spectral markers and preview line"""
+    
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    
+    handles = []
+    labels = []
+    
+    spectra_items = list(spectra_dict.items())
+    
+    if x_ranges is None or len(x_ranges) == 0:
+        # Simple plot without broken axis
+        for idx, (name, spec) in enumerate(spectra_items):
+            data = spec['data']
+            x = data['x'].values
+            y = data['y'].values
+            color = spec['color']
+            
+            display_name = name.replace('.txt', '')
+            
+            # Apply subtract minimum intensity if requested
+            if subtract_min_intensity and normalized:
+                if len(y) > 0:
+                    y = y - y.min()
+                else:
+                    y = y
+            
+            # Apply cumulative offset if requested
+            if use_offset:
+                offset = idx * offset_step
+            else:
+                offset = 0
+            
+            y_plot = y + offset
+            
+            if fill_area and normalized:
+                # Check if data is valid for fill_between
+                if len(x) > 0 and len(y_plot) > 0:
+                    # Clean data for fill_between
+                    mask = np.isfinite(x) & np.isfinite(y_plot) & np.isfinite(offset)
+                    x_clean = x[mask]
+                    y_clean = y_plot[mask]
+                    if len(x_clean) > 1:
+                        ax.fill_between(x_clean, offset, y_clean, alpha=fill_alpha, color=color)
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
+            else:
+                line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
+            
+            handles.append(line_handle[0])
+            labels.append(display_name)
+        
+        ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
+        ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
+        
+    else:
+        # Broken axis plot with multiple x-ranges
+        for range_idx, (start, end) in enumerate(x_ranges):
+            for idx, (name, spec) in enumerate(spectra_items):
+                data = spec['data']
+                x_full = data['x'].values
+                y_full = data['y'].values
+                color = spec['color']
+                
+                display_name = name.replace('.txt', '')
+                
+                # Crop to current range
+                mask = (x_full >= start) & (x_full <= end)
+                if not np.any(mask):
+                    continue
+                
+                x = x_full[mask]
+                y = y_full[mask]
+                
+                # Apply subtract minimum intensity if requested
+                if subtract_min_intensity and normalized:
+                    y = y - y.min()
+                
+                # Apply cumulative offset if requested
+                if use_offset:
+                    offset = idx * offset_step
+                else:
+                    offset = 0
+                
+                y_plot = y + offset
+                
+                # Plot
+                if fill_area and normalized:
+                    ax.fill_between(x, offset, y_plot, alpha=fill_alpha, color=color)
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
+                else:
+                    line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
+                
+                # Add to handles only for first range
+                if range_idx == 0:
+                    handles.append(line_handle[0])
+                    labels.append(display_name)
+            
+            # Add vertical line for range boundaries
+            ax.axvline(start, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+            ax.axvline(end, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+        
+        ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
+        ax.set_ylabel(y_label, fontsize=10, fontweight='bold')
+    
+    # Add spectral markers (confirmed)
+    marker_colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', 
+                     '#1abc9c', '#e67e22', '#2c3e50', '#e84393', '#00b894',
+                     '#6c5ce7', '#fd79a8', '#00cec9', '#fdcb6e', '#e17055']
+    
+    # Get y limits for text positioning (above the plot)
+    y_min, y_max = ax.get_ylim()
+    y_range = y_max - y_min
+    text_y = y_max + y_range * 0.05  # Position above the plot
+    
+    for i, marker in enumerate(markers):
+        color = marker_colors[i % len(marker_colors)]
+        
+        if marker['type'] == 'line':
+            # Draw vertical line - thin dash-dot
+            ax.axvline(x=marker['position'], color=color, linestyle='-.', 
+                      linewidth=1, alpha=0.9, zorder=10)
+            
+            # Add label above the plot if show_x_values is True
+            if show_x_values:
+                label_text = f"{marker['position']:.1f}"
+                if marker['name']:
+                    label_text = f"{marker['name']}: {label_text}"
+                ax.text(marker['position'], text_y, label_text, 
+                       color=color, fontsize=9, fontweight='bold', ha='center',
+                       va='bottom', transform=ax.get_xaxis_transform())
+            
+        elif marker['type'] == 'area':
+            # Draw vertical area (semi-transparent band)
+            half_width = marker['width'] / 2
+            x_min_area = marker['position'] - half_width
+            x_max_area = marker['position'] + half_width
+            
+            ax.axvspan(x_min_area, x_max_area, alpha=0.25, color=color, zorder=5)
+            ax.axvline(x=marker['position'], color=color, linestyle='-.', 
+                      linewidth=1, alpha=0.9, zorder=10)
+            
+            # Add label above the plot if show_x_values is True
+            if show_x_values:
+                label_text = f"[{x_min_area:.1f}, {x_max_area:.1f}]"
+                if marker['name']:
+                    label_text = f"{marker['name']}: {label_text}"
+                ax.text(marker['position'], text_y, label_text, 
+                       color=color, fontsize=9, fontweight='bold', ha='center',
+                       va='bottom', transform=ax.get_xaxis_transform())
+    
+    # Add PREVIEW line/area (temporary, shown while slider is active)
+    if preview_position is not None:
+        # Convert hex color to RGBA with alpha
+        preview_color_rgb = plt.matplotlib.colors.to_rgb(preview_color)
+        preview_color_rgba = (preview_color_rgb[0], preview_color_rgb[1], preview_color_rgb[2], 0.5)
+        
+        if preview_mode == 'line':
+            # Preview line - thin dash-dot with alpha
+            ax.axvline(x=preview_position, color=preview_color, linestyle='-.', 
+                      linewidth=1, alpha=0.5, zorder=9, label='Preview')
+            
+            # Show preview label if show_x_values is True
+            if show_x_values:
+                ax.text(preview_position, text_y, f"Preview: {preview_position:.1f}", 
+                       color=preview_color, fontsize=8, fontweight='bold', ha='center',
+                       va='bottom', alpha=0.6, transform=ax.get_xaxis_transform(),
+                       style='italic')
+        
+        elif preview_mode == 'area' and preview_width > 0:
+            # Preview area
+            half_width = preview_width / 2
+            x_min_preview = preview_position - half_width
+            x_max_preview = preview_position + half_width
+            
+            ax.axvspan(x_min_preview, x_max_preview, alpha=0.15, color=preview_color, zorder=8)
+            ax.axvline(x=preview_position, color=preview_color, linestyle='-.', 
+                      linewidth=1, alpha=0.5, zorder=9, label='Preview')
+            
+            # Show preview label if show_x_values is True
+            if show_x_values:
+                label_text = f"Preview: [{x_min_preview:.1f}, {x_max_preview:.1f}]"
+                ax.text(preview_position, text_y, label_text, 
+                       color=preview_color, fontsize=8, fontweight='bold', ha='center',
+                       va='bottom', alpha=0.6, transform=ax.get_xaxis_transform(),
+                       style='italic')
+    
+    # Adjust y-limits to make room for text above the plot
+    if show_x_values and (markers or preview_position is not None):
+        # Increase upper y-limit to accommodate text
+        ax.set_ylim(y_min, y_max + y_range * 0.15)
+    
+    # Add legend with customizable settings
+    if handles:
+        # Adjust legend position
+        if legend_position == "right":
+            bbox_anchor = (legend_offset, 0.5)
+            loc = 'center left'
+        elif legend_position == "best":
+            bbox_anchor = None
+            loc = 'best'
+        else:
+            # For specific positions like 'upper right', 'upper left', etc.
+            bbox_anchor = None
+            loc = legend_position
+        
+        # Create legend
+        if use_offset and legend_position == "right":
+            # Reverse order for offset plots
+            reversed_handles = list(reversed(handles))
+            reversed_labels = list(reversed(labels))
+            legend = ax.legend(reversed_handles, reversed_labels, 
+                              loc=loc, 
+                              bbox_to_anchor=bbox_anchor,
+                              fontsize=legend_fontsize,
+                              frameon=True, 
+                              edgecolor='black', 
+                              prop={'weight': 'bold'})
+            for text, handle in zip(legend.get_texts(), reversed_handles):
+                text.set_color(handle.get_color())
+        else:
+            legend = ax.legend(handles, labels, 
+                              loc=loc, 
+                              bbox_to_anchor=bbox_anchor,
+                              fontsize=legend_fontsize,
+                              frameon=True, 
+                              edgecolor='black', 
+                              prop={'weight': 'bold'})
+            if legend_position == "right":
+                for text, handle in zip(legend.get_texts(), handles):
+                    text.set_color(handle.get_color())
+        
+        # Adjust legend box if it's too large
+        if len(handles) > 10:
+            legend._legend_box.align = "left"
+            # Set number of columns for large legends
+            if len(handles) > 15:
+                legend._ncol = 2
+    
+    ax.tick_params(direction='in', length=5, width=1)
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Dynamic right margin adjustment based on legend size and position
+    if legend_position == "right" and len(handles) > 0:
+        # Calculate margin based on number of spectra and font size
+        estimated_legend_width = min(0.35, 0.15 + (len(handles) * legend_fontsize / 300))
+        right_margin = min(0.95, legend_offset + estimated_legend_width)
+        plt.tight_layout()
+        plt.subplots_adjust(right=right_margin)
+    else:
+        plt.tight_layout()
+    
+    return fig
+
 # Main app
 def main():
     # Custom header with logo
@@ -1737,8 +1994,12 @@ def main():
                     st.session_state.heatmap_applied = False
                     st.session_state.heatmap_params = {}
                     st.session_state.spectral_markers = []
-                    # Clear file uploader by rerunning
+                    st.session_state.spectral_markers_temp_position = None
+                    st.session_state.spectral_markers_temp_width = 0.0
+                    st.session_state.spectral_markers_temp_name = ""
+                    st.session_state.spectral_markers_mode = 'line'
                     st.rerun()
+
             with col2:
                 st.markdown("")
         
@@ -3011,6 +3272,27 @@ def main():
                 else:
                     y_label_plot = f"Normalized {y_label}"
                 
+                # Global settings for markers
+                st.markdown("---")
+                st.markdown("#### ⚙️ Marker Settings")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    show_x_values = st.checkbox(
+                        "Show x coordinates on plot",
+                        value=False,
+                        key="show_x_values_markers",
+                        help="Display numerical x values above each marker"
+                    )
+                
+                with col2:
+                    preview_color = st.color_picker(
+                        "Preview line color",
+                        value="#808080",
+                        key="preview_color_marker",
+                        help="Color for the temporary preview line when moving the slider"
+                    )
+                
                 # Display current markers table
                 st.markdown("---")
                 st.markdown("#### 📋 Current Markers")
@@ -3021,123 +3303,31 @@ def main():
                     markers_df.index = range(1, len(markers_df) + 1)
                     markers_df.index.name = "#"
                     
-                    # Display with action buttons
-                    cols = st.columns([5, 1, 1])
-                    with cols[0]:
-                        st.dataframe(markers_df[['type', 'position', 'width', 'name']], use_container_width=True)
-                    with cols[1]:
-                        st.write("")
-                        st.write("**Action**")
-                    with cols[2]:
-                        st.write("")
-                        st.write("**Action**")
+                    # Display marker data
+                    display_df = markers_df[['type', 'position', 'width', 'name']].copy()
+                    display_df['type'] = display_df['type'].map({'line': 'Line', 'area': 'Area'})
+                    display_df['width'] = display_df['width'].apply(lambda x: f"{x:.2f}" if x > 0 else "-")
+                    display_df['position'] = display_df['position'].apply(lambda x: f"{x:.2f}")
+                    display_df['name'] = display_df['name'].apply(lambda x: x if x else "—")
                     
-                    # Create delete buttons for each marker
-                    for i in range(len(st.session_state.spectral_markers) - 1, -1, -1):
-                        col1, col2, col3 = st.columns([5, 1, 1])
-                        with col1:
-                            st.write(f"")
-                        with col2:
-                            if st.button(f"🗑️ Delete #{i+1}", key=f"del_marker_{i}"):
+                    st.dataframe(display_df, use_container_width=True)
+                    
+                    # Delete buttons for each marker (only delete, no edit)
+                    st.markdown("**Delete markers:**")
+                    delete_cols = st.columns(min(5, len(st.session_state.spectral_markers)))
+                    for i, marker in enumerate(st.session_state.spectral_markers):
+                        col_idx = i % len(delete_cols)
+                        with delete_cols[col_idx]:
+                            marker_label = marker['name'] if marker['name'] else f"#{i+1}"
+                            if st.button(f"🗑️ {marker_label}", key=f"del_marker_{i}"):
                                 del st.session_state.spectral_markers[i]
-                                st.rerun()
-                        with col3:
-                            if st.button(f"✏️ Edit #{i+1}", key=f"edit_marker_{i}"):
-                                st.session_state.spectral_markers_editing_index = i
-                                marker = st.session_state.spectral_markers[i]
-                                st.session_state.spectral_markers_temp_position = marker['position']
-                                st.session_state.spectral_markers_temp_width = marker['width']
-                                st.session_state.spectral_markers_temp_name = marker['name']
-                                st.session_state.spectral_markers_mode = marker['type']
                                 st.rerun()
                 else:
                     st.info("No markers added yet. Use the controls below to add markers.")
                 
-                # Show editing controls if editing mode is active
-                if st.session_state.spectral_markers_editing_index >= 0:
-                    st.markdown("---")
-                    st.markdown(f"#### ✏️ Editing Marker #{st.session_state.spectral_markers_editing_index + 1}")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        edit_position = st.number_input(
-                            "Position (x value)",
-                            value=st.session_state.spectral_markers_temp_position,
-                            step=1.0,
-                            format="%.1f",
-                            key="edit_position"
-                        )
-                    with col2:
-                        edit_name = st.text_input(
-                            "Marker name (optional)",
-                            value=st.session_state.spectral_markers_temp_name,
-                            key="edit_name"
-                        )
-                    
-                    # Get x range for slider
-                    all_x_for_edit = []
-                    for spec in selected_spectra.values():
-                        all_x_for_edit.extend(spec['data']['x'].values)
-                    if all_x_for_edit:
-                        x_min_edit = float(np.min(all_x_for_edit))
-                        x_max_edit = float(np.max(all_x_for_edit))
-                        
-                        edit_position_slider = st.slider(
-                            "Move marker position",
-                            min_value=x_min_edit,
-                            max_value=x_max_edit,
-                            value=edit_position,
-                            step=(x_max_edit - x_min_edit) / 1000,
-                            key="edit_position_slider"
-                        )
-                        edit_position = edit_position_slider
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button("✅ Save Changes", key="save_edit"):
-                            if st.session_state.spectral_markers_editing_index >= 0:
-                                idx = st.session_state.spectral_markers_editing_index
-                                marker = st.session_state.spectral_markers[idx]
-                                marker['position'] = edit_position
-                                marker['name'] = edit_name
-                                st.session_state.spectral_markers_editing_index = -1
-                                st.rerun()
-                    with col2:
-                        if st.button("❌ Cancel", key="cancel_edit"):
-                            st.session_state.spectral_markers_editing_index = -1
-                            st.rerun()
-                    with col3:
-                        if st.button("🗑️ Delete While Editing", key="delete_while_edit"):
-                            idx = st.session_state.spectral_markers_editing_index
-                            if 0 <= idx < len(st.session_state.spectral_markers):
-                                del st.session_state.spectral_markers[idx]
-                            st.session_state.spectral_markers_editing_index = -1
-                            st.rerun()
-                    
-                    st.markdown("---")
-                
                 # Add new marker controls
+                st.markdown("---")
                 st.markdown("#### ➕ Add New Marker")
-                
-                # Step 1: Select mode
-                col1, col2 = st.columns(2)
-                with col1:
-                    marker_mode = st.radio(
-                        "Marker type:",
-                        options=['line', 'area'],
-                        format_func=lambda x: 'Vertical Line' if x == 'line' else 'Vertical Area (band)',
-                        index=0 if st.session_state.spectral_markers_mode == 'line' else 1,
-                        key="marker_mode_radio"
-                    )
-                    st.session_state.spectral_markers_mode = marker_mode
-                
-                with col2:
-                    marker_name = st.text_input(
-                        "Marker name (optional, e.g., Peak 1, I, II, etc.)",
-                        value=st.session_state.spectral_markers_temp_name,
-                        key="marker_name_input"
-                    )
-                    st.session_state.spectral_markers_temp_name = marker_name
                 
                 # Get global x range for slider
                 all_x_markers = []
@@ -3148,7 +3338,30 @@ def main():
                     x_min_marker = float(np.min(all_x_markers))
                     x_max_marker = float(np.max(all_x_markers))
                     
-                    # Position slider
+                    # Step 1: Select mode
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        marker_mode = st.radio(
+                            "Marker type:",
+                            options=['line', 'area'],
+                            format_func=lambda x: 'Vertical Line' if x == 'line' else 'Vertical Area (band)',
+                            index=0 if st.session_state.spectral_markers_mode == 'line' else 1,
+                            key="marker_mode_radio"
+                        )
+                        st.session_state.spectral_markers_mode = marker_mode
+                    
+                    with col2:
+                        marker_name = st.text_input(
+                            "Marker name (optional, e.g., I, Peak 1, etc.)",
+                            value=st.session_state.spectral_markers_temp_name,
+                            key="marker_name_input",
+                            placeholder="Leave empty for no name"
+                        )
+                        st.session_state.spectral_markers_temp_name = marker_name
+                    
+                    # Position slider (with preview)
+                    st.markdown("**Move slider to preview marker position:**")
+                    
                     position = st.slider(
                         "Marker position (x value)",
                         min_value=x_min_marker,
@@ -3162,6 +3375,7 @@ def main():
                     # Area width controls (only for area mode)
                     area_width = 0
                     if marker_mode == 'area':
+                        st.markdown("**Area width settings:**")
                         col1, col2 = st.columns(2)
                         with col1:
                             width_slider = st.slider(
@@ -3184,11 +3398,15 @@ def main():
                             )
                             area_width = width_input
                             st.session_state.spectral_markers_temp_width = width_input
+                        
+                        st.info(f"Preview range: {position - area_width/2:.2f} to {position + area_width/2:.2f}")
+                    else:
+                        st.info(f"Preview position: {position:.2f}")
                     
-                    # Buttons
+                    # Buttons for adding markers
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        if st.button("➕ Add Line", key="add_line_btn", disabled=(marker_mode == 'area')):
+                        if st.button("✅ Add Line", key="add_line_btn", disabled=(marker_mode == 'area')):
                             # Add line marker
                             new_marker = {
                                 'type': 'line',
@@ -3201,7 +3419,7 @@ def main():
                             st.rerun()
                     
                     with col2:
-                        if st.button("➕ Add Area", key="add_area_btn", disabled=(marker_mode == 'line')):
+                        if st.button("✅ Add Area", key="add_area_btn", disabled=(marker_mode == 'line')):
                             # Add area marker
                             new_marker = {
                                 'type': 'area',
@@ -3217,35 +3435,42 @@ def main():
                         if st.button("🗑️ Clear All Markers", key="clear_all_markers"):
                             st.session_state.spectral_markers = []
                             st.rerun()
-                    
-                    # Show current marker info
-                    if marker_mode == 'line':
-                        st.info(f"Current position: {position:.2f}")
-                    else:
-                        st.info(f"Current position: {position:.2f}, Width: {area_width:.2f} (range: {position - area_width/2:.2f} to {position + area_width/2:.2f})")
                 
-                # Display the plot with markers
+                # Display the plot with markers AND preview line
                 st.markdown("---")
                 st.subheader("📊 Plot with Markers")
                 
-                if st.session_state.spectral_markers:
-                    st.caption(f"Showing {len(st.session_state.spectral_markers)} markers")
-                else:
-                    st.caption("No markers added yet")
+                # Show preview information
+                if st.session_state.spectral_markers_temp_position is not None:
+                    if st.session_state.spectral_markers_mode == 'line':
+                        st.caption(f"🔍 Preview: Line at {st.session_state.spectral_markers_temp_position:.2f}")
+                    else:
+                        half_w = st.session_state.spectral_markers_temp_width / 2
+                        st.caption(f"🔍 Preview: Area at {st.session_state.spectral_markers_temp_position:.2f} ± {half_w:.2f}")
                 
-                # Create the plot with markers
-                fig_markers = create_spectral_markers_plot(
+                if st.session_state.spectral_markers:
+                    st.caption(f"📌 {len(st.session_state.spectral_markers)} markers placed")
+                else:
+                    st.caption("No markers placed yet")
+                
+                # Create the plot with markers AND preview
+                fig_markers = create_spectral_markers_plot_with_preview(
                     selected_spectra, x_label, y_label_plot,
                     offset_step, fill, normalized, use_offset,
                     x_ranges, subtract_min_intensity, fill_alpha,
                     show_grid, line_width, fig_width, fig_height,
                     cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
-                    st.session_state.spectral_markers
+                    st.session_state.spectral_markers,
+                    st.session_state.spectral_markers_temp_position,
+                    st.session_state.spectral_markers_temp_width,
+                    st.session_state.spectral_markers_mode,
+                    show_x_values,
+                    preview_color
                 )
                 st.pyplot(fig_markers)
                 
                 # Download button for marker plot
-                if st.session_state.spectral_markers:
+                if st.session_state.spectral_markers or st.session_state.spectral_markers_temp_position is not None:
                     buf = BytesIO()
                     fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
                     buf.seek(0)
