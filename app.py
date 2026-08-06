@@ -12,6 +12,7 @@ from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
 import os
+import base64
 
 # Set page config with custom theme
 st.set_page_config(
@@ -90,15 +91,31 @@ if 'spectral_markers_show_preview' not in st.session_state:
     st.session_state.spectral_markers_show_preview = True
 
 def load_instruction_html():
-    """Load instruction HTML file from root directory"""
+    """Load instruction HTML file and embed logo as base64"""
     try:
-        # Пытаемся загрузить instruction.html из корневой папки
+        # Читаем HTML-шаблон
         if os.path.exists('instruction.html'):
             with open('instruction.html', 'r', encoding='utf-8') as f:
-                return f.read()
+                html_content = f.read()
+            
+            # Кодируем логотип в base64
+            if os.path.exists('logo.png'):
+                with open('logo.png', 'rb') as f:
+                    logo_data = f.read()
+                    logo_base64 = base64.b64encode(logo_data).decode('utf-8')
+                # Заменяем плейсхолдер на base64
+                html_content = html_content.replace('{logo_base64}', logo_base64)
+            else:
+                # Если логотип не найден, используем эмоджи как запасной вариант
+                html_content = html_content.replace('{logo_base64}', '')
+                html_content = html_content.replace('<div style="display: flex; justify-content: center; margin-bottom: 10px;">', 
+                                                   '<div style="display: flex; justify-content: center; margin-bottom: 10px; font-size: 48px;">🔬')
+            
+            return html_content
         else:
             return None
     except Exception as e:
+        print(f"Error loading instruction: {e}")
         return None
 
 # Custom CSS for modern scientific design
