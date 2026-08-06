@@ -1771,17 +1771,17 @@ def main():
     with st.sidebar:
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
         
-        # Кнопка для открытия инструкции
+        # Кнопка для скачивания инструкции
         st.markdown("### 📚 Documentation")
         
         # Проверяем наличие файла инструкции
         instruction_content = load_instruction_html()
         if instruction_content:
-            # Кодируем HTML в base64 для отображения
+            # Кодируем HTML в base64 для скачивания
             b64_instruction = base64.b64encode(instruction_content.encode('utf-8')).decode()
             st.markdown(f"""
             <div style="margin-bottom: 0.5rem;">
-                <a href="data:text/html;base64,{b64_instruction}" target="_blank"
+                <a href="data:text/html;base64,{b64_instruction}" download="SpectrAnalys_Instruction.html" 
                    style="display: inline-block; 
                           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                           color: white; 
@@ -1793,11 +1793,12 @@ def main():
                           width: 100%;
                           text-align: center;
                           transition: all 0.3s;">
-                    📖 Open Full Instruction (HTML)
+                    📖 Download Full Instruction (HTML)
                 </a>
             </div>
             """, unsafe_allow_html=True)
             
+            # Добавляем небольшую подпись
             st.caption("💡 Complete user guide with detailed workflow")
         else:
             st.warning("⚠️ Instruction file not found. Please ensure 'instruction.html' is in the root folder.")
