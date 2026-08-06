@@ -2173,6 +2173,25 @@ def main():
                             norm_method, norm_range, x_ranges
                         )
                         
+                        # Сортируем по значениям y_values
+                        if spectra_matrix is not None and len(y_values) > 0:
+                            # Создаем список кортежей для сортировки
+                            sorted_data = sorted(
+                                [(y_values[i], i) for i in range(len(y_values))],
+                                key=lambda x: x[0]
+                            )
+                            
+                            # Перестраиваем матрицы в отсортированном порядке
+                            sorted_indices = [item[1] for item in sorted_data]
+                            spectra_matrix = spectra_matrix[sorted_indices]
+                            spectra_norm_matrix = spectra_norm_matrix[sorted_indices]
+                            y_values = np.array([y_values[i] for i in sorted_indices])
+                            
+                            # Обновляем session_state
+                            st.session_state.heatmap_spectra_matrix = spectra_matrix
+                            st.session_state.heatmap_spectra_norm_matrix = spectra_norm_matrix
+                            st.session_state.heatmap_y_values = y_values
+                        
                         if spectra_matrix is not None:
                             st.session_state.heatmap_spectra_matrix = spectra_matrix
                             st.session_state.heatmap_spectra_norm_matrix = spectra_norm_matrix
