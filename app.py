@@ -2037,19 +2037,72 @@ def main():
                     # Create input fields for each spectrum
                     st.markdown("#### Assign values to spectra:")
                     
+                    # Добавляем чекбокс для автоматического присвоения значений из имени файла
+                    use_filename_values = st.checkbox(
+                        "📄 Assign as the file name (extract numbers from filenames)",
+                        value=False,
+                        help="Automatically extract numeric values from filenames (e.g., '0.05.txt' → 0.05, 'temp_100.txt' → 100)"
+                    )
+                    
+                    # Функция для извлечения числа из имени файла
+                    def extract_number_from_filename(filename):
+                        """Extract the first number found in filename"""
+                        import re
+                        # Убираем расширение .txt
+                        name = filename.replace('.txt', '')
+                        # Ищем все числа в имени файла (включая десятичные)
+                        numbers = re.findall(r'[-+]?\d*\.?\d+', name)
+                        if numbers:
+                            # Берем первое найденное число
+                            return float(numbers[0])
+                        return None
+                    
                     # Use a container with no rerun on change
                     heatmap_params_temp = {}
                     for name in ordered_spectra:
                         display_name = name.replace('.txt', '')
                         # Use a unique key for each input
                         param_key = f"heatmap_{name}"
+                        
+                        # Если чекбокс включен, пытаемся извлечь число из имени файла
+                        if use_filename_values:
+                            extracted_value = extract_number_from_filename(name)
+                            if extracted_value is not None:
+                                default_value = extracted_value
+                            else:
+                                default_value = st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0)
+                        else:
+                            default_value = st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0)
+                        
                         heatmap_params_temp[name] = st.number_input(
                             f"{display_name}",
-                            value=st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0),
+                            value=default_value,
                             step=0.01,
                             format="%.2f",
                             key=param_key
                         )
+                    
+                    # Показываем извлеченные значения, если чекбокс включен
+                    if use_filename_values:
+                        st.markdown("---")
+                        st.markdown("#### 📋 Extracted values from filenames:")
+                        extracted_data = []
+                        for name in ordered_spectra:
+                            value = extract_number_from_filename(name)
+                            if value is not None:
+                                extracted_data.append({
+                                    'Filename': name,
+                                    'Extracted Value': value
+                                })
+                            else:
+                                extracted_data.append({
+                                    'Filename': name,
+                                    'Extracted Value': '❌ No number found'
+                                })
+                        
+                        # Показываем в виде таблицы
+                        extracted_df = pd.DataFrame(extracted_data)
+                        st.dataframe(extracted_df, use_container_width=True, hide_index=True)
                     
                     # Heatmap visualization settings
                     st.markdown("#### 🎨 Heatmap Settings")
