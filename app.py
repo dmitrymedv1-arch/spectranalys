@@ -11,6 +11,7 @@ import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
+import os
 
 # Set page config with custom theme
 st.set_page_config(
@@ -87,6 +88,18 @@ if 'spectral_markers_temp_color' not in st.session_state:
     st.session_state.spectral_markers_temp_color = '#000000'
 if 'spectral_markers_show_preview' not in st.session_state:
     st.session_state.spectral_markers_show_preview = True
+
+def load_instruction_html():
+    """Load instruction HTML file from root directory"""
+    try:
+        # Пытаемся загрузить instruction.html из корневой папки
+        if os.path.exists('instruction.html'):
+            with open('instruction.html', 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            return None
+    except Exception as e:
+        return None
 
 # Custom CSS for modern scientific design
 st.markdown("""
@@ -1468,7 +1481,6 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
 
 # NEW FUNCTION: Create spectral markers plot
-# NEW FUNCTION: Create spectral markers plot
 def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step, 
                                   fill_area, normalized, use_offset, x_ranges,
                                   subtract_min_intensity, fill_alpha, show_grid,
@@ -1725,6 +1737,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
     
     return fig
 
+
 # Main app
 def main():
     # Custom header with logo
@@ -1757,6 +1770,39 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+        
+        # Кнопка для открытия инструкции
+        st.markdown("### 📚 Documentation")
+        
+        # Проверяем наличие файла инструкции
+        instruction_content = load_instruction_html()
+        if instruction_content:
+            # Кодируем HTML в base64 для отображения
+            b64_instruction = base64.b64encode(instruction_content.encode('utf-8')).decode()
+            st.markdown(f"""
+            <div style="margin-bottom: 0.5rem;">
+                <a href="data:text/html;base64,{b64_instruction}" target="_blank"
+                   style="display: inline-block; 
+                          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                          color: white; 
+                          padding: 8px 16px; 
+                          border-radius: 8px; 
+                          text-decoration: none;
+                          font-weight: 500;
+                          font-size: 0.9rem;
+                          width: 100%;
+                          text-align: center;
+                          transition: all 0.3s;">
+                    📖 Open Full Instruction (HTML)
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.caption("💡 Complete user guide with detailed workflow")
+        else:
+            st.warning("⚠️ Instruction file not found. Please ensure 'instruction.html' is in the root folder.")
+        
+        st.markdown("---")
         st.markdown("### 📁 Data Import")
         uploaded_files = st.file_uploader(
             "Upload spectra files (.txt format, tab-separated)",
