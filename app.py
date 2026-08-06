@@ -2057,6 +2057,17 @@ def main():
                             return float(numbers[0])
                         return None
                     
+                    # Если включен чекбокс, автоматически заполняем значения из имен файлов
+                    if use_filename_values:
+                        # Обновляем session_state.heatmap_params значениями из имен файлов
+                        for name in ordered_spectra:
+                            extracted_value = extract_number_from_filename(name)
+                            if extracted_value is not None:
+                                st.session_state.heatmap_params[name] = extracted_value
+                            # Если число не найдено, оставляем текущее значение или устанавливаем 0
+                            elif name not in st.session_state.heatmap_params:
+                                st.session_state.heatmap_params[name] = 0.0
+                    
                     # Use a container with no rerun on change
                     heatmap_params_temp = {}
                     for name in ordered_spectra:
@@ -2064,15 +2075,8 @@ def main():
                         # Use a unique key for each input
                         param_key = f"heatmap_{name}"
                         
-                        # Если чекбокс включен, пытаемся извлечь число из имени файла
-                        if use_filename_values:
-                            extracted_value = extract_number_from_filename(name)
-                            if extracted_value is not None:
-                                default_value = extracted_value
-                            else:
-                                default_value = st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0)
-                        else:
-                            default_value = st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0)
+                        # Берем значение из session_state (которое уже обновлено, если чекбокс включен)
+                        default_value = st.session_state.heatmap_params.get(name, len(heatmap_params_temp) + 1.0)
                         
                         heatmap_params_temp[name] = st.number_input(
                             f"{display_name}",
