@@ -2161,6 +2161,15 @@ def main():
                     )
                     
                     if apply_heatmap:
+                        # Проверяем, включен ли чекбокс для извлечения значений из имен файлов
+                        if use_filename_values:
+                            # Извлекаем значения из имен файлов и обновляем heatmap_params_temp
+                            for name in ordered_spectra:
+                                extracted_value = extract_number_from_filename(name)
+                                if extracted_value is not None:
+                                    heatmap_params_temp[name] = extracted_value
+                                # Если число не найдено, оставляем текущее значение
+                        
                         # Store heatmap parameters in session state
                         st.session_state.heatmap_params = heatmap_params_temp
                         st.session_state.heatmap_param_type = heatmap_param_type
