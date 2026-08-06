@@ -1768,17 +1768,8 @@ def main():
             col1, col2 = st.columns([3, 1])
             with col1:
                 if st.button("🗑️ Remove all spectra", type="secondary", use_container_width=True):
-                    # Clear all spectrum-related session state but preserve UI settings
-                    st.session_state.spectra_loaded = False
-                    st.session_state.cached_spectra_data = None
-                    st.session_state.peak_analysis_triggered = False
-                    st.session_state.peak_analysis_results = None
-                    st.session_state.correlation_ready = False
-                    st.session_state.excluded_peaks = set()
-                    st.session_state.heatmap_applied = False
-                    st.session_state.heatmap_params = {}
-                    st.session_state.spectral_markers = []
-                    # Clear file uploader by rerunning
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
                     st.rerun()
             with col2:
                 st.markdown("")
