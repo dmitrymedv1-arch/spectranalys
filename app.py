@@ -37,6 +37,8 @@ if 'cached_spectra_data' not in st.session_state:
     st.session_state.cached_spectra_data = None
 if 'excluded_peaks' not in st.session_state:
     st.session_state.excluded_peaks = set()
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = 0
 
 # NEW: Heatmap session state variables
 if 'heatmap_params' not in st.session_state:
@@ -1760,7 +1762,7 @@ def main():
             "Upload spectra files (.txt format, tab-separated)",
             type=['txt'],
             accept_multiple_files=True,
-            key="file_uploader"
+            key=f"file_uploader_{st.session_state.uploader_key}"  # <-- Уникальный ключ
         )
         
         # NEW: Remove all spectra button
@@ -1768,8 +1770,15 @@ def main():
             col1, col2 = st.columns([3, 1])
             with col1:
                 if st.button("🗑️ Remove all spectra", type="secondary", use_container_width=True):
+                    # Увеличиваем счетчик для создания нового ключа file_uploader
+                    st.session_state.uploader_key = st.session_state.uploader_key + 1
+                    
+                    # Полный сброс всех переменных сессии, КРОМЕ uploader_key
+                    keys_to_keep = ['uploader_key']  # сохраняем этот ключ
                     for key in list(st.session_state.keys()):
-                        del st.session_state[key]
+                        if key not in keys_to_keep:
+                            del st.session_state[key]
+                    
                     st.rerun()
             with col2:
                 st.markdown("")
