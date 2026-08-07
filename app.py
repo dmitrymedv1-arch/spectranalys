@@ -3572,8 +3572,8 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
     # Footer
     st.markdown("""
     <div class="footer">
-        <p>🔬 SpectrAnalys v2.0 | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
-        <p style="font-size: 0.75rem;">© 2026 SpectrAnalys - Advanced Spectroscopy Data Analysis Tool</p>
+        <p>🔬 SpectrAnalys | Scientific Spectroscopic Analysis Platform | Built with Streamlit & Python</p>
+        <p style="font-size: 0.75rem;">© 2026 SpectrAnalys | © developed by daM - Advanced Spectroscopy Data Analysis Tool</p>
     </div>
     """, unsafe_allow_html=True)
 
