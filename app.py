@@ -3151,8 +3151,8 @@ def main():
                 st.info("Upload multiple .txt files to compare different samples or treatments.")
             
             st.markdown('</div>', unsafe_allow_html=True)
-        
 
+        
         # NEW TAB 5: Spectral Markers
         with tab5:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3253,7 +3253,7 @@ def main():
                     )
                     st.session_state.spectral_markers_temp_name = marker_name
                     
-                    # Add Line button - WITHOUT rerun
+                    # Add Line button - используем экспериментальный rerun для обновления интерфейса
                     if st.button("➕ Add Line", use_container_width=True):
                         # Add a new line marker with pending=True to enable region expansion
                         new_marker = {
@@ -3268,6 +3268,7 @@ def main():
                         st.session_state.spectral_markers_temp_name = ""
                         st.session_state.spectral_markers_update_needed = True
                         st.success(f"✅ Line added at position {marker_position:.1f}. Now you can expand it to a region!")
+                        st.rerun()  # Нужен для переключения на режим региона
                     
                     # Display info about existing markers
                     if st.session_state.spectral_markers:
@@ -3302,6 +3303,7 @@ def main():
                                     st.session_state.spectral_markers_update_needed = True
                                     st.success(f"✅ Region added: center={marker['position']:.1f}, half-width={region_width:.1f}")
                                     st.session_state.spectral_markers_preview_width = 0
+                                    st.rerun()  # Возврат в режим линии
                                     break
                     
                     with col2:
@@ -3314,6 +3316,7 @@ def main():
                                     st.session_state.spectral_markers_update_needed = True
                                     st.info(f"⏹️ Line kept at position {marker['position']:.1f} (not expanded to region)")
                                     st.session_state.spectral_markers_preview_width = 0
+                                    st.rerun()  # Возврат в режим линии
                                     break
                 
                 # --- PLOT WITH MARKERS (SECOND) ---
@@ -3436,6 +3439,7 @@ def main():
                                         # Remove marker
                                         st.session_state.spectral_markers.pop(row['index'])
                                         st.session_state.spectral_markers_update_needed = True
+                                        st.rerun()  # Обновляем отображение после удаления
                             
                             # Clear all markers button
                             if st.button("🗑️ Clear All Markers", use_container_width=True):
@@ -3443,6 +3447,7 @@ def main():
                                 st.session_state.spectral_markers_preview_position = None
                                 st.session_state.spectral_markers_preview_width = 0
                                 st.session_state.spectral_markers_update_needed = True
+                                st.rerun()  # Обновляем отображение после очистки
                     else:
                         st.info("No confirmed markers yet. Use the controls above to add lines or regions.")
                 else:
