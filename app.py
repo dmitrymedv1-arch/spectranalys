@@ -13,6 +13,10 @@ from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
 import os
 import base64
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+from matplotlib.ticker import LinearLocator
+import matplotlib.colors as mcolors
 
 # Set page config with custom theme
 st.set_page_config(
@@ -89,9 +93,26 @@ if 'spectral_markers_temp_color' not in st.session_state:
     st.session_state.spectral_markers_temp_color = '#000000'
 if 'spectral_markers_show_preview' not in st.session_state:
     st.session_state.spectral_markers_show_preview = True
-# NEW: Flag to trigger marker plot update without full rerun
 if 'spectral_markers_update_needed' not in st.session_state:
     st.session_state.spectral_markers_update_needed = False
+
+# NEW: 3D Graphs session state variables
+if 'enable_3d_graphs' not in st.session_state:
+    st.session_state.enable_3d_graphs = False
+if 'graph3d_x_label' not in st.session_state:
+    st.session_state.graph3d_x_label = 'Raman shift (cm⁻¹)'
+if 'graph3d_y_label' not in st.session_state:
+    st.session_state.graph3d_y_label = 'Parameter'
+if 'graph3d_z_label' not in st.session_state:
+    st.session_state.graph3d_z_label = 'Intensity (a.u.)'
+if 'graph3d_azimuth' not in st.session_state:
+    st.session_state.graph3d_azimuth = -60
+if 'graph3d_elevation' not in st.session_state:
+    st.session_state.graph3d_elevation = 30
+if 'graph3d_params' not in st.session_state:
+    st.session_state.graph3d_params = {}
+if 'graph3d_created' not in st.session_state:
+    st.session_state.graph3d_created = False
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -844,7 +865,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 bbox_anchor = (legend_offset, 0.5)
                 loc = 'center left'
             elif legend_position == "best":
-                bbox_anchor = None                
+                bbox_anchor = None
                 loc = 'best'
             else:
                 bbox_anchor = None
@@ -1789,6 +1810,194 @@ def prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, 
     
     return normalized_spectra
 
+# NEW: Function to prepare data for 3D graphs
+def prepare_3d_data(spectra_dict, ordered_spectra, graph3d_params, x_ranges, norm_method, norm_range):
+    """Prepare data matrices for 3D graphs"""
+    
+    # Get all spectra data and interpolate to common x grid
+    all_x = []
+    for name in ordered_spectra:
+        if name in spectra_dict:
+            x_vals = spectra_dict[name]['data']['x'].values
+            if len(x_vals) > 0:
+                all_x.extend(x_vals)
+    
+    if not all_x:
+        return None, None, None, None
+    
+    if x_ranges is not None and len(x_ranges) > 0:
+        # Use the min of all range starts and max of all range ends
+        range_starts = [start for start, end in x_ranges]
+        range_ends = [end for start, end in x_ranges]
+        x_min = min(range_starts)
+        x_max = max(range_ends)
+        
+        # Verify that there is data in these ranges for all spectra
+        has_data_in_ranges = True
+        for name in ordered_spectra:
+            if name in spectra_dict:
+                x_vals = spectra_dict[name]['data']['x'].values
+                in_range = False
+                for start, end in x_ranges:
+                    mask = (x_vals >= start) & (x_vals <= end)
+                    if np.any(mask):
+                        in_range = True
+                        break
+                if not in_range:
+                    has_data_in_ranges = False
+                    break
+        
+        if not has_data_in_ranges:
+            x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+            x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    else:
+        x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+        x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    
+    if x_min >= x_max:
+        return None, None, None, None
+    
+    common_x = np.linspace(x_min, x_max, 2000)
+    
+    # Prepare matrices
+    spectra_matrix = []
+    spectra_norm_matrix = []
+    y_values = []
+    colors = []
+    
+    for name in ordered_spectra:
+        if name not in spectra_dict or name not in graph3d_params:
+            continue
+        
+        # Get spectrum data
+        data = spectra_dict[name]['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        
+        # If x_ranges specified, create mask for ranges and crop data
+        if x_ranges is not None and len(x_ranges) > 0:
+            mask_total = np.zeros_like(x_orig, dtype=bool)
+            for start, end in x_ranges:
+                mask_range = (x_orig >= start) & (x_orig <= end)
+                mask_total = mask_total | mask_range
+            
+            if np.any(mask_total):
+                x_cropped = x_orig[mask_total]
+                y_cropped = y_orig[mask_total]
+            else:
+                x_cropped = x_orig
+                y_cropped = y_orig
+        else:
+            x_cropped = x_orig
+            y_cropped = y_orig
+        
+        if len(x_cropped) == 0:
+            continue
+        
+        # Interpolate to common x grid
+        y_interp = np.interp(common_x, x_cropped, y_cropped)
+        
+        # Normalize spectrum
+        y_norm = normalize_spectrum(
+            common_x, 
+            y_interp, 
+            norm_method, 
+            norm_range,
+            x_ranges
+        )
+        
+        # Store in matrices
+        spectra_matrix.append(y_interp)
+        spectra_norm_matrix.append(y_norm)
+        
+        # Get parameter value
+        param_value = graph3d_params[name]
+        y_values.append(param_value)
+        
+        # Get color
+        colors.append(spectra_dict[name]['color'])
+    
+    if not spectra_matrix:
+        return None, None, None, None, None
+    
+    return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values), colors
+
+# NEW: Function to create 3D surface plot
+def create_3d_surface_plot(X, Y, Z, x_label, y_label, z_label, colormap, 
+                           azimuth, elevation, show_grid=True, fig_width=10, fig_height=8,
+                           title=""):
+    """Create 3D surface plot"""
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Create mesh grid
+    X_grid, Y_grid = np.meshgrid(X, Y)
+    
+    # Plot surface
+    surf = ax.plot_surface(X_grid, Y_grid, Z, cmap=colormap, 
+                          linewidth=0, antialiased=True, alpha=0.9)
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=12, fontweight='bold', labelpad=10)
+    ax.set_ylabel(y_label, fontsize=12, fontweight='bold', labelpad=10)
+    ax.set_zlabel(z_label, fontsize=12, fontweight='bold', labelpad=10)
+    
+    # Set viewing angle
+    ax.view_init(elev=elevation, azim=azimuth)
+    
+    # Set grid
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Add colorbar
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=20)
+    cbar.set_label(z_label, fontsize=11, fontweight='bold')
+    
+    # Set title if provided
+    if title:
+        ax.set_title(title, fontsize=13, fontweight='bold', pad=20)
+    
+    plt.tight_layout()
+    return fig
+
+# NEW: Function to create 3D line plot
+def create_3d_line_plot(X, Y, Z, colors, x_label, y_label, z_label, 
+                        azimuth, elevation, line_width=1.5, show_grid=True, 
+                        fig_width=10, fig_height=8, title=""):
+    """Create 3D line plot with each spectrum as a separate line"""
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot each spectrum as a 3D line
+    for i in range(len(Z)):
+        y_pos = np.full_like(X, Y[i])
+        ax.plot(X, y_pos, Z[i], color=colors[i], linewidth=line_width, alpha=0.8)
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=12, fontweight='bold', labelpad=10)
+    ax.set_ylabel(y_label, fontsize=12, fontweight='bold', labelpad=10)
+    ax.set_zlabel(z_label, fontsize=12, fontweight='bold', labelpad=10)
+    
+    # Set viewing angle
+    ax.view_init(elev=elevation, azim=azimuth)
+    
+    # Set grid
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Set title if provided
+    if title:
+        ax.set_title(title, fontsize=13, fontweight='bold', pad=20)
+    
+    plt.tight_layout()
+    return fig
+
 # Main app
 def main():
     # Custom header with logo
@@ -2102,6 +2311,156 @@ def main():
                         
                         param_label = st.text_input("Parameter label", value="Sample number")
                     
+                    # NEW: 3D Graphs section
+                    st.markdown("---")
+                    st.markdown("### 📊 3D Graphs")
+                    enable_3d = st.checkbox("3D Graphs - Create 3D graphs", value=st.session_state.enable_3d_graphs)
+                    st.session_state.enable_3d_graphs = enable_3d
+                    
+                    if enable_3d:
+                        st.markdown("#### 📐 3D Axis Labels")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            graph3d_x_label = st.text_input(
+                                "X-axis label (Raman shift)",
+                                value=st.session_state.graph3d_x_label,
+                                key="graph3d_x_label_input"
+                            )
+                            st.session_state.graph3d_x_label = graph3d_x_label
+                        with col2:
+                            graph3d_y_label = st.text_input(
+                                "Y-axis label (Parameter)",
+                                value=st.session_state.graph3d_y_label,
+                                key="graph3d_y_label_input"
+                            )
+                            st.session_state.graph3d_y_label = graph3d_y_label
+                        with col3:
+                            graph3d_z_label = st.text_input(
+                                "Z-axis label (Intensity)",
+                                value=st.session_state.graph3d_z_label,
+                                key="graph3d_z_label_input"
+                            )
+                            st.session_state.graph3d_z_label = graph3d_z_label
+                        
+                        st.markdown("#### 📍 Parameter Values for Y-axis")
+                        st.markdown("*Assign numeric values to each spectrum for the Y-axis*")
+                        
+                        # Use filename extraction option
+                        use_filename_values_3d = st.checkbox(
+                            "📄 Extract numbers from filenames for Y-axis",
+                            value=False,
+                            key="use_filename_values_3d",
+                            help="Automatically extract numeric values from filenames"
+                        )
+                        
+                        def extract_number_from_filename(filename):
+                            """Extract the first number found in filename"""
+                            import re
+                            name = filename.replace('.txt', '')
+                            numbers = re.findall(r'[-+]?\d*\.?\d+', name)
+                            if numbers:
+                                return float(numbers[0])
+                            return None
+                        
+                        if use_filename_values_3d:
+                            for name in ordered_spectra:
+                                extracted_value = extract_number_from_filename(name)
+                                if extracted_value is not None:
+                                    st.session_state.graph3d_params[name] = extracted_value
+                                elif name not in st.session_state.graph3d_params:
+                                    st.session_state.graph3d_params[name] = 0.0
+                        
+                        graph3d_params_temp = {}
+                        for name in ordered_spectra:
+                            display_name = name.replace('.txt', '')
+                            default_value = st.session_state.graph3d_params.get(name, len(graph3d_params_temp) + 1.0)
+                            graph3d_params_temp[name] = st.number_input(
+                                f"{display_name}",
+                                value=default_value,
+                                step=0.01,
+                                format="%.2f",
+                                key=f"graph3d_{name}"
+                            )
+                        
+                        # Show extracted values if checkbox is enabled
+                        if use_filename_values_3d:
+                            st.markdown("#### 📋 Extracted values from filenames:")
+                            extracted_data = []
+                            for name in ordered_spectra:
+                                value = extract_number_from_filename(name)
+                                if value is not None:
+                                    extracted_data.append({
+                                        'Filename': name,
+                                        'Extracted Value': value
+                                    })
+                                else:
+                                    extracted_data.append({
+                                        'Filename': name,
+                                        'Extracted Value': '❌ No number found'
+                                    })
+                            extracted_df = pd.DataFrame(extracted_data)
+                            st.dataframe(extracted_df, use_container_width=True, hide_index=True)
+                        
+                        # Store parameters in session state
+                        st.session_state.graph3d_params = graph3d_params_temp
+                        
+                        st.markdown("#### 🎯 Viewing Angle Settings")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            graph3d_azimuth = st.slider(
+                                "Azimuth (rotation)",
+                                min_value=-180,
+                                max_value=180,
+                                value=st.session_state.graph3d_azimuth,
+                                step=5,
+                                key="graph3d_azimuth_slider"
+                            )
+                            st.session_state.graph3d_azimuth = graph3d_azimuth
+                        with col2:
+                            graph3d_elevation = st.slider(
+                                "Elevation (height)",
+                                min_value=0,
+                                max_value=90,
+                                value=st.session_state.graph3d_elevation,
+                                step=5,
+                                key="graph3d_elevation_slider"
+                            )
+                            st.session_state.graph3d_elevation = graph3d_elevation
+                        
+                        # Create Graphs button
+                        if st.button("🚀 Create Graphs", use_container_width=True, key="create_3d_graphs_button"):
+                            with st.spinner("Generating 3D graphs..."):
+                                # Prepare data for 3D graphs
+                                spectra_matrix, spectra_norm_matrix, x_grid, y_values, colors = prepare_3d_data(
+                                    spectra_data, ordered_spectra, graph3d_params_temp, 
+                                    x_ranges, norm_method, norm_range
+                                )
+                                
+                                if spectra_matrix is not None and len(y_values) > 0:
+                                    # Sort by Y values
+                                    sorted_data = sorted(
+                                        [(y_values[i], i) for i in range(len(y_values))],
+                                        key=lambda x: x[0]
+                                    )
+                                    sorted_indices = [item[1] for item in sorted_data]
+                                    spectra_matrix = spectra_matrix[sorted_indices]
+                                    spectra_norm_matrix = spectra_norm_matrix[sorted_indices]
+                                    y_values = np.array([y_values[i] for i in sorted_indices])
+                                    colors = [colors[i] for i in sorted_indices]
+                                    
+                                    # Store in session state
+                                    st.session_state.graph3d_created = True
+                                    st.session_state.graph3d_spectra_matrix = spectra_matrix
+                                    st.session_state.graph3d_spectra_norm_matrix = spectra_norm_matrix
+                                    st.session_state.graph3d_x_grid = x_grid
+                                    st.session_state.graph3d_y_values = y_values
+                                    st.session_state.graph3d_colors = colors
+                                    
+                                    st.success(f"✅ 3D graphs generated! {len(y_values)} spectra prepared.")
+                                else:
+                                    st.error("❌ Failed to prepare data for 3D graphs. Check that all spectra are valid.")
+                                    st.session_state.graph3d_created = False
+                    
                     # NEW: Heatmap Parameters Section
                     st.markdown("---")
                     st.markdown("### 📊 Heatmap Parameters")
@@ -2141,19 +2500,6 @@ def main():
                         value=False,
                         help="Automatically extract numeric values from filenames (e.g., '0.05.txt' → 0.05, 'temp_100.txt' → 100)"
                     )
-                    
-                    # Функция для извлечения числа из имени файла
-                    def extract_number_from_filename(filename):
-                        """Extract the first number found in filename"""
-                        import re
-                        # Убираем расширение .txt
-                        name = filename.replace('.txt', '')
-                        # Ищем все числа в имени файла (включая десятичные)
-                        numbers = re.findall(r'[-+]?\d*\.?\d+', name)
-                        if numbers:
-                            # Берем первое найденное число
-                            return float(numbers[0])
-                        return None
                     
                     # Если включен чекбокс, автоматически заполняем значения из имен файлов
                     if use_filename_values:
@@ -2375,7 +2721,16 @@ def main():
                         'heatmap_interpolation': st.session_state.heatmap_interpolation,
                         'heatmap_colormap': st.session_state.heatmap_colormap,
                         'heatmap_y_label': st.session_state.heatmap_y_label,
-                        'heatmap_applied': st.session_state.heatmap_applied
+                        'heatmap_applied': st.session_state.heatmap_applied,
+                        # NEW: 3D Graphs settings
+                        'enable_3d_graphs': st.session_state.enable_3d_graphs,
+                        'graph3d_params': st.session_state.graph3d_params,
+                        'graph3d_x_label': st.session_state.graph3d_x_label,
+                        'graph3d_y_label': st.session_state.graph3d_y_label,
+                        'graph3d_z_label': st.session_state.graph3d_z_label,
+                        'graph3d_azimuth': st.session_state.graph3d_azimuth,
+                        'graph3d_elevation': st.session_state.graph3d_elevation,
+                        'graph3d_created': st.session_state.graph3d_created
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -2464,14 +2819,25 @@ def main():
         # Filter spectra based on selection
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
         
-        # Create tabs for different analysis views - NEW: Added comparison tab
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Combined Spectra Visualization",
-            "🔍 Advanced Peak Analysis", 
-            "📈 Parameter Correlation",
-            "🔀 Compare Two Spectra",
-            "📏 Spectral Markers"
-        ])
+        # Create tabs for different analysis views
+        # NEW: Added 3D Graphs tab (visible only if enabled)
+        if st.session_state.get('enable_3d_graphs', False):
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                "📊 Combined Spectra Visualization",
+                "🔍 Advanced Peak Analysis", 
+                "📈 Parameter Correlation",
+                "🔀 Compare Two Spectra",
+                "📏 Spectral Markers",
+                "🎲 3D Graphs"
+            ])
+        else:
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📊 Combined Spectra Visualization",
+                "🔍 Advanced Peak Analysis", 
+                "📈 Parameter Correlation",
+                "🔀 Compare Two Spectra",
+                "📏 Spectral Markers"
+            ])
         
         with tab1:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3151,8 +3517,8 @@ def main():
                 st.info("Upload multiple .txt files to compare different samples or treatments.")
             
             st.markdown('</div>', unsafe_allow_html=True)
-
         
+
         # NEW TAB 5: Spectral Markers
         with tab5:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3458,6 +3824,177 @@ def main():
             
             st.markdown('</div>', unsafe_allow_html=True)
         
+        # NEW TAB 6: 3D Graphs (visible only if enabled)
+        if st.session_state.get('enable_3d_graphs', False):
+            with tab6:
+                st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+                st.subheader("🎲 3D Visualization")
+                st.markdown("*Three-dimensional representation of spectral evolution as function of parameter*")
+                
+                # Check if 3D graphs have been created
+                if st.session_state.get('graph3d_created', False):
+                    # Get data from session state
+                    spectra_matrix = st.session_state.get('graph3d_spectra_matrix')
+                    spectra_norm_matrix = st.session_state.get('graph3d_spectra_norm_matrix')
+                    x_grid = st.session_state.get('graph3d_x_grid')
+                    y_values = st.session_state.get('graph3d_y_values')
+                    colors = st.session_state.get('graph3d_colors')
+                    graph3d_x_label = st.session_state.get('graph3d_x_label', 'Raman shift (cm⁻¹)')
+                    graph3d_y_label = st.session_state.get('graph3d_y_label', 'Parameter')
+                    graph3d_z_label = st.session_state.get('graph3d_z_label', 'Intensity (a.u.)')
+                    graph3d_azimuth = st.session_state.get('graph3d_azimuth', -60)
+                    graph3d_elevation = st.session_state.get('graph3d_elevation', 30)
+                    heatmap_colormap = st.session_state.get('heatmap_colormap', 'viridis')
+                    
+                    if spectra_matrix is not None and x_grid is not None and y_values is not None:
+                        # --- 1. 3D Surface Plot (Original Intensity) ---
+                        st.markdown("#### 3D Surface Plot (Original Intensity)")
+                        fig_surface_orig = create_3d_surface_plot(
+                            x_grid, y_values, spectra_matrix,
+                            graph3d_x_label, graph3d_y_label, graph3d_z_label,
+                            heatmap_colormap, graph3d_azimuth, graph3d_elevation,
+                            show_grid=show_grid,
+                            fig_width=fig_width+2, fig_height=fig_height+1,
+                            title="3D Surface Plot - Original Intensity"
+                        )
+                        st.pyplot(fig_surface_orig)
+                        
+                        # Download button for surface plot (original)
+                        buf = BytesIO()
+                        fig_surface_orig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                            <a href="data:image/png;base64,{b64}" download="3d_surface_original_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                                    📥 Download Surface Plot (Original) (PNG, 600 dpi)
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        plt.close(fig_surface_orig)
+                        
+                        # --- 2. 3D Surface Plot (Normalized Intensity) ---
+                        st.markdown("#### 3D Surface Plot (Normalized Intensity)")
+                        fig_surface_norm = create_3d_surface_plot(
+                            x_grid, y_values, spectra_norm_matrix,
+                            graph3d_x_label, graph3d_y_label, f"Normalized {graph3d_z_label}",
+                            heatmap_colormap, graph3d_azimuth, graph3d_elevation,
+                            show_grid=show_grid,
+                            fig_width=fig_width+2, fig_height=fig_height+1,
+                            title="3D Surface Plot - Normalized Intensity"
+                        )
+                        st.pyplot(fig_surface_norm)
+                        
+                        # Download button for surface plot (normalized)
+                        buf = BytesIO()
+                        fig_surface_norm.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                            <a href="data:image/png;base64,{b64}" download="3d_surface_normalized_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                                    📥 Download Surface Plot (Normalized) (PNG, 600 dpi)
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        plt.close(fig_surface_norm)
+                        
+                        # --- 3. 3D Line Plot (Original Intensity) ---
+                        st.markdown("#### 3D Line Plot (Original Intensity)")
+                        fig_line_orig = create_3d_line_plot(
+                            x_grid, y_values, spectra_matrix, colors,
+                            graph3d_x_label, graph3d_y_label, graph3d_z_label,
+                            graph3d_azimuth, graph3d_elevation,
+                            line_width=line_width,
+                            show_grid=show_grid,
+                            fig_width=fig_width+2, fig_height=fig_height+1,
+                            title="3D Line Plot - Original Intensity"
+                        )
+                        st.pyplot(fig_line_orig)
+                        
+                        # Download button for line plot (original)
+                        buf = BytesIO()
+                        fig_line_orig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                            <a href="data:image/png;base64,{b64}" download="3d_line_original_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                                    📥 Download Line Plot (Original) (PNG, 600 dpi)
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        plt.close(fig_line_orig)
+                        
+                        # --- 4. 3D Line Plot (Normalized Intensity) ---
+                        st.markdown("#### 3D Line Plot (Normalized Intensity)")
+                        fig_line_norm = create_3d_line_plot(
+                            x_grid, y_values, spectra_norm_matrix, colors,
+                            graph3d_x_label, graph3d_y_label, f"Normalized {graph3d_z_label}",
+                            graph3d_azimuth, graph3d_elevation,
+                            line_width=line_width,
+                            show_grid=show_grid,
+                            fig_width=fig_width+2, fig_height=fig_height+1,
+                            title="3D Line Plot - Normalized Intensity"
+                        )
+                        st.pyplot(fig_line_norm)
+                        
+                        # Download button for line plot (normalized)
+                        buf = BytesIO()
+                        fig_line_norm.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                            <a href="data:image/png;base64,{b64}" download="3d_line_normalized_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                                    📥 Download Line Plot (Normalized) (PNG, 600 dpi)
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        plt.close(fig_line_norm)
+                        
+                        # Show parameter values used
+                        st.markdown("---")
+                        st.markdown("#### 📊 3D Graph Parameters Used:")
+                        param_3d_df = pd.DataFrame({
+                            'Spectrum': [name.replace('.txt', '') for name in ordered_spectra if name in st.session_state.graph3d_params],
+                            graph3d_y_label: [st.session_state.graph3d_params[name] for name in ordered_spectra if name in st.session_state.graph3d_params]
+                        })
+                        st.dataframe(param_3d_df, use_container_width=True)
+                        
+                        # Add info about viewing angle
+                        st.caption(f"Viewing angle: Azimuth={graph3d_azimuth}°, Elevation={graph3d_elevation}° | Colormap: {heatmap_colormap}")
+                    else:
+                        st.warning("⚠️ 3D graph data not available. Please click 'Create Graphs' in the sidebar.")
+                else:
+                    st.info("🎲 Configure 3D graph parameters in the sidebar and click 'Create Graphs' to generate 3D visualizations.")
+                    st.markdown("""
+                    **To create 3D graphs:**
+                    1. Enable '3D Graphs - Create 3D graphs' in the sidebar
+                    2. Set axis labels (optional)
+                    3. Assign parameter values to each spectrum for the Y-axis
+                    4. Adjust viewing angle (optional)
+                    5. Click 'Create Graphs' button
+                    """)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+        
         # Export options section
         st.markdown("---")
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3536,6 +4073,8 @@ Line Width: {line_width}
 Peak Analysis: {analyze_peaks_flag}
 Correlation Analysis: {param_correlation}
 Spectral Markers: {len(st.session_state.spectral_markers)} markers
+3D Graphs Enabled: {st.session_state.get('enable_3d_graphs', False)}
+3D Graphs Created: {st.session_state.get('graph3d_created', False)}
 """
             st.download_button(
                 label="📄 Export Session Info",
@@ -3560,7 +4099,8 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
         5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
         6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
         7. **Add Markers** - Place vertical lines and regions to track spectral features
-        8. **Export Results** - Download processed data, plots, and analysis results
+        8. **3D Visualization** - Explore spectra in 3D with surface and line plots
+        9. **Export Results** - Download processed data, plots, and analysis results
         """)
         
         st.markdown("### ✨ Key Features:")
@@ -3573,6 +4113,7 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
         - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
         - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
         - 📏 **Spectral Markers** - Add vertical lines and regions to track peak positions across conditions
+        - 🎲 **3D Visualization** - Surface and line plots for comprehensive spectral analysis
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
         - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
         - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
