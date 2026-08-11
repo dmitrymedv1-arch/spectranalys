@@ -13,6 +13,9 @@ from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
 import os
 import base64
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.collections import PolyCollection
+from matplotlib import cm
 
 # Set page config with custom theme
 st.set_page_config(
@@ -92,6 +95,32 @@ if 'spectral_markers_show_preview' not in st.session_state:
 # NEW: Flag to trigger marker plot update without full rerun
 if 'spectral_markers_update_needed' not in st.session_state:
     st.session_state.spectral_markers_update_needed = False
+
+# NEW: 3D Graphs session state variables
+if 'enable_3d_graphs' not in st.session_state:
+    st.session_state.enable_3d_graphs = False
+if 'graph3d_x_label' not in st.session_state:
+    st.session_state.graph3d_x_label = 'Raman shift (cm⁻¹)'
+if 'graph3d_z_label' not in st.session_state:
+    st.session_state.graph3d_z_label = 'Intensity (a.u.)'
+if 'graph3d_y_label' not in st.session_state:
+    st.session_state.graph3d_y_label = 'Parameter'
+if 'graph3d_y_values' not in st.session_state:
+    st.session_state.graph3d_y_values = {}
+if 'graph3d_offset_z' not in st.session_state:
+    st.session_state.graph3d_offset_z = 0.5
+if 'graph3d_offset_x' not in st.session_state:
+    st.session_state.graph3d_offset_x = 0.0
+if 'graph3d_offset_y' not in st.session_state:
+    st.session_state.graph3d_offset_y = 1.0
+if 'graph3d_surface_enabled' not in st.session_state:
+    st.session_state.graph3d_surface_enabled = False
+if 'graph3d_bar_enabled' not in st.session_state:
+    st.session_state.graph3d_bar_enabled = False
+if 'graph3d_created' not in st.session_state:
+    st.session_state.graph3d_created = False
+if 'graph3d_figures' not in st.session_state:
+    st.session_state.graph3d_figures = []
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -844,7 +873,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 bbox_anchor = (legend_offset, 0.5)
                 loc = 'center left'
             elif legend_position == "best":
-                bbox_anchor = None                
+                bbox_anchor = None
                 loc = 'best'
             else:
                 bbox_anchor = None
@@ -1789,6 +1818,252 @@ def prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, 
     
     return normalized_spectra
 
+# NEW: Function to create 3D line plot
+def create_3d_line_plot(spectra_dict, x_label, y_label, z_label, y_values,
+                         offset_z, offset_x, offset_y, x_ranges,
+                         subtract_min_intensity, fill_area, fill_alpha,
+                         show_grid, line_width, fig_width, fig_height,
+                         normalized=False, norm_method=None, norm_range=None,
+                         apply_offset_z=True, apply_offset_x=True):
+    """Create 3D line plot with spectra as lines in 3D space"""
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Prepare data
+    spectra_items = list(spectra_dict.items())
+    
+    # Sort spectra by y_values if available
+    if y_values:
+        sorted_indices = sorted(range(len(spectra_items)), 
+                               key=lambda i: y_values.get(spectra_items[i][0], i))
+        spectra_items = [spectra_items[i] for i in sorted_indices]
+    
+    for idx, (name, spec) in enumerate(spectra_items):
+        data = spec['data']
+        x = data['x'].values
+        y = data['y'].values
+        color = spec['color']
+        
+        # Apply normalization if requested
+        if normalized and norm_method:
+            y = normalize_spectrum(x, y, norm_method, norm_range, x_ranges)
+        
+        # Apply subtract minimum intensity if requested
+        if subtract_min_intensity:
+            if len(y) > 0:
+                y = y - y.min()
+        
+        # Apply offsets
+        z_offset = idx * offset_z if apply_offset_z else 0
+        x_offset = idx * offset_x if apply_offset_x else 0
+        y_pos = y_values.get(name, idx * offset_y) if y_values else idx * offset_y
+        
+        x_plot = x + x_offset
+        z_plot = y + z_offset
+        
+        # Plot the line
+        ax.plot(x_plot, [y_pos] * len(x_plot), z_plot, 
+                color=color, linewidth=line_width, alpha=0.8)
+        
+        # Add fill if requested
+        if fill_area and normalized:
+            # Create a polygon for fill
+            verts = [(x_plot[i], y_pos, z_plot[i]) for i in range(len(x_plot))]
+            verts.append((x_plot[-1], y_pos, 0))
+            verts.append((x_plot[0], y_pos, 0))
+            # Simple fill with reduced alpha
+            ax.plot(x_plot, [y_pos] * len(x_plot), z_plot, 
+                    color=color, linewidth=line_width, alpha=0.8)
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_ylabel(y_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_zlabel(z_label, fontsize=10, fontweight='bold', labelpad=10)
+    
+    # Set grid
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Adjust view angle
+    ax.view_init(elev=25, azim=-45)
+    
+    plt.tight_layout()
+    return fig
+
+# NEW: Function to create 3D surface plot
+def create_3d_surface_plot(spectra_dict, x_label, y_label, z_label, y_values,
+                            offset_z, offset_x, offset_y, x_ranges,
+                            subtract_min_intensity, show_grid, line_width,
+                            fig_width, fig_height, normalized=False,
+                            norm_method=None, norm_range=None,
+                            cmap_name='viridis', alpha=0.8):
+    """Create 3D surface plot from spectra"""
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Prepare data - interpolate to common x grid
+    all_x = []
+    for spec in spectra_dict.values():
+        all_x.extend(spec['data']['x'].values)
+    
+    if not all_x:
+        return fig
+    
+    x_min = max([spec['data']['x'].min() for spec in spectra_dict.values()])
+    x_max = min([spec['data']['x'].max() for spec in spectra_dict.values()])
+    
+    if x_min >= x_max:
+        return fig
+    
+    common_x = np.linspace(x_min, x_max, 500)
+    
+    # Sort spectra by y_values
+    spectra_items = list(spectra_dict.items())
+    if y_values:
+        sorted_indices = sorted(range(len(spectra_items)), 
+                               key=lambda i: y_values.get(spectra_items[i][0], i))
+        spectra_items = [spectra_items[i] for i in sorted_indices]
+    
+    # Build matrices for surface
+    X_grid = []
+    Y_grid = []
+    Z_grid = []
+    
+    for idx, (name, spec) in enumerate(spectra_items):
+        data = spec['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        
+        # Apply normalization if requested
+        if normalized and norm_method:
+            y_orig = normalize_spectrum(x_orig, y_orig, norm_method, norm_range, x_ranges)
+        
+        # Apply subtract minimum intensity if requested
+        if subtract_min_intensity:
+            if len(y_orig) > 0:
+                y_orig = y_orig - y_orig.min()
+        
+        # Interpolate to common x grid
+        y_interp = np.interp(common_x, x_orig, y_orig)
+        
+        # Apply offsets
+        z_offset = idx * offset_z
+        x_offset = idx * offset_x
+        y_pos = y_values.get(name, idx * offset_y) if y_values else idx * offset_y
+        
+        X_grid.append(common_x + x_offset)
+        Y_grid.append([y_pos] * len(common_x))
+        Z_grid.append(y_interp + z_offset)
+    
+    # Convert to numpy arrays
+    X = np.array(X_grid)
+    Y = np.array(Y_grid)
+    Z = np.array(Z_grid)
+    
+    # Create surface plot
+    surf = ax.plot_surface(X, Y, Z, cmap=cmap_name, alpha=alpha, 
+                          linewidth=0, antialiased=True, shade=True)
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_ylabel(y_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_zlabel(z_label, fontsize=10, fontweight='bold', labelpad=10)
+    
+    # Set grid
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Adjust view angle
+    ax.view_init(elev=25, azim=-45)
+    
+    # Add colorbar
+    fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label='Intensity (a.u.)')
+    
+    plt.tight_layout()
+    return fig
+
+# NEW: Function to create 3D bar/ribbon plot
+def create_3d_bar_plot(spectra_dict, x_label, y_label, z_label, y_values,
+                        offset_z, offset_x, offset_y, x_ranges,
+                        subtract_min_intensity, show_grid, line_width,
+                        fig_width, fig_height, normalized=False,
+                        norm_method=None, norm_range=None,
+                        bar_width=0.8, alpha=0.7):
+    """Create 3D bar/ribbon plot from spectra"""
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Prepare data
+    spectra_items = list(spectra_dict.items())
+    
+    # Sort spectra by y_values
+    if y_values:
+        sorted_indices = sorted(range(len(spectra_items)), 
+                               key=lambda i: y_values.get(spectra_items[i][0], i))
+        spectra_items = [spectra_items[i] for i in sorted_indices]
+    
+    # Determine number of points for each spectrum
+    max_points = 50
+    for name, spec in spectra_items:
+        max_points = min(max_points, len(spec['data']['x']))
+    
+    if max_points < 2:
+        return fig
+    
+    # Create bar positions
+    for idx, (name, spec) in enumerate(spectra_items):
+        data = spec['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        
+        # Apply normalization if requested
+        if normalized and norm_method:
+            y_orig = normalize_spectrum(x_orig, y_orig, norm_method, norm_range, x_ranges)
+        
+        # Apply subtract minimum intensity if requested
+        if subtract_min_intensity:
+            if len(y_orig) > 0:
+                y_orig = y_orig - y_orig.min()
+        
+        # Sample x positions
+        step = max(1, len(x_orig) // max_points)
+        x_sampled = x_orig[::step]
+        y_sampled = y_orig[::step]
+        
+        # Apply offsets
+        z_offset = idx * offset_z
+        x_offset = idx * offset_x
+        y_pos = y_values.get(name, idx * offset_y) if y_values else idx * offset_y
+        
+        # Create bars
+        ax.bar(x_sampled + x_offset, y_sampled + z_offset, 
+               zs=y_pos, zdir='y', width=bar_width,
+               color=spec['color'], alpha=alpha, align='center')
+    
+    # Set labels
+    ax.set_xlabel(x_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_ylabel(y_label, fontsize=10, fontweight='bold', labelpad=10)
+    ax.set_zlabel(z_label, fontsize=10, fontweight='bold', labelpad=10)
+    
+    # Set grid
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax.grid(False)
+    
+    # Adjust view angle
+    ax.view_init(elev=25, azim=-45)
+    
+    plt.tight_layout()
+    return fig
+
 # Main app
 def main():
     # Custom header with logo
@@ -2313,6 +2588,16 @@ def main():
                             st.error("❌ Failed to prepare heatmap data. Check that all spectra are valid.")
                             st.session_state.heatmap_applied = False
                     
+                    # NEW: 3D Graphs checkbox
+                    st.markdown("---")
+                    st.markdown("### 🎲 3D Graphs")
+                    enable_3d_graphs = st.checkbox(
+                        "3D Graphs - Create 3D graphs",
+                        value=st.session_state.enable_3d_graphs,
+                        help="Enable 3D visualization of spectra in a separate tab"
+                    )
+                    st.session_state.enable_3d_graphs = enable_3d_graphs
+                    
                     # Color Assignment moved to the bottom
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
@@ -2375,7 +2660,9 @@ def main():
                         'heatmap_interpolation': st.session_state.heatmap_interpolation,
                         'heatmap_colormap': st.session_state.heatmap_colormap,
                         'heatmap_y_label': st.session_state.heatmap_y_label,
-                        'heatmap_applied': st.session_state.heatmap_applied
+                        'heatmap_applied': st.session_state.heatmap_applied,
+                        # NEW: 3D Graphs settings
+                        'enable_3d_graphs': st.session_state.enable_3d_graphs
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -2464,13 +2751,14 @@ def main():
         # Filter spectra based on selection
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
         
-        # Create tabs for different analysis views - NEW: Added comparison tab
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        # Create tabs for different analysis views - NEW: Added comparison tab and 3D Graphs tab
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Combined Spectra Visualization",
             "🔍 Advanced Peak Analysis", 
             "📈 Parameter Correlation",
             "🔀 Compare Two Spectra",
-            "📏 Spectral Markers"
+            "📏 Spectral Markers",
+            "🎲 3D Graphs"
         ])
         
         with tab1:
@@ -3151,8 +3439,8 @@ def main():
                 st.info("Upload multiple .txt files to compare different samples or treatments.")
             
             st.markdown('</div>', unsafe_allow_html=True)
-
         
+
         # NEW TAB 5: Spectral Markers
         with tab5:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3458,6 +3746,278 @@ def main():
             
             st.markdown('</div>', unsafe_allow_html=True)
         
+        # NEW TAB 6: 3D Graphs
+        with tab6:
+            st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+            st.subheader("🎲 3D Spectral Visualization")
+            st.markdown("*Generate 3D plots with configurable axis labels and offsets*")
+            
+            if st.session_state.enable_3d_graphs:
+                # --- 3D Graphs Configuration Section ---
+                st.markdown("#### ⚙️ 3D Plot Configuration")
+                st.markdown("*Adjust settings below, then click 'Create Graphs' to generate 3D visualizations*")
+                
+                # Axis labels configuration
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    graph3d_x_label = st.text_input(
+                        "X-axis label",
+                        value=st.session_state.graph3d_x_label,
+                        key="graph3d_x_label_input"
+                    )
+                    st.session_state.graph3d_x_label = graph3d_x_label
+                
+                with col2:
+                    graph3d_y_label = st.text_input(
+                        "Y-axis label (parameter)",
+                        value=st.session_state.graph3d_y_label,
+                        key="graph3d_y_label_input"
+                    )
+                    st.session_state.graph3d_y_label = graph3d_y_label
+                
+                with col3:
+                    graph3d_z_label = st.text_input(
+                        "Z-axis label",
+                        value=st.session_state.graph3d_z_label,
+                        key="graph3d_z_label_input"
+                    )
+                    st.session_state.graph3d_z_label = graph3d_z_label
+                
+                st.markdown("---")
+                
+                # Y-values assignment for each spectrum
+                st.markdown("#### 📊 Assign Y-axis values to each spectrum")
+                st.markdown("*These values determine the position of each spectrum along the Y-axis*")
+                
+                graph3d_y_values = {}
+                for name in ordered_spectra:
+                    display_name = name.replace('.txt', '')
+                    default_y = st.session_state.graph3d_y_values.get(name, len(graph3d_y_values) + 1.0)
+                    graph3d_y_values[name] = st.number_input(
+                        f"{display_name}",
+                        value=default_y,
+                        step=0.1,
+                        format="%.2f",
+                        key=f"graph3d_y_{name}"
+                    )
+                st.session_state.graph3d_y_values = graph3d_y_values
+                
+                st.markdown("---")
+                
+                # Offset controls
+                st.markdown("#### 📏 Offset Controls")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    graph3d_offset_z = st.slider(
+                        "Z-offset step (vertical spacing)",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=st.session_state.graph3d_offset_z,
+                        step=0.05,
+                        key="graph3d_offset_z_slider",
+                        help="Offset between spectra along Z-axis (intensity)"
+                    )
+                    st.session_state.graph3d_offset_z = graph3d_offset_z
+                
+                with col2:
+                    graph3d_offset_x = st.slider(
+                        "X-offset step (horizontal spacing)",
+                        min_value=0.0,
+                        max_value=50.0,
+                        value=st.session_state.graph3d_offset_x,
+                        step=0.5,
+                        key="graph3d_offset_x_slider",
+                        help="Offset between spectra along X-axis (Raman shift)"
+                    )
+                    st.session_state.graph3d_offset_x = graph3d_offset_x
+                
+                with col3:
+                    graph3d_offset_y = st.slider(
+                        "Y-offset step (parameter spacing)",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=st.session_state.graph3d_offset_y,
+                        step=0.05,
+                        key="graph3d_offset_y_slider",
+                        help="Default spacing between spectra along Y-axis if values not assigned"
+                    )
+                    st.session_state.graph3d_offset_y = graph3d_offset_y
+                
+                st.markdown("---")
+                
+                # Additional 3D plot types
+                st.markdown("#### 🎨 Additional Visualization Types")
+                col1, col2 = st.columns(2)
+                with col1:
+                    graph3d_surface_enabled = st.checkbox(
+                        "Generate Surface Plot",
+                        value=st.session_state.graph3d_surface_enabled,
+                        key="graph3d_surface_checkbox",
+                        help="Create 3D surface plot connecting spectra"
+                    )
+                    st.session_state.graph3d_surface_enabled = graph3d_surface_enabled
+                
+                with col2:
+                    graph3d_bar_enabled = st.checkbox(
+                        "Generate Bar/Ribbon Plot",
+                        value=st.session_state.graph3d_bar_enabled,
+                        key="graph3d_bar_checkbox",
+                        help="Create 3D bar/ribbon plot"
+                    )
+                    st.session_state.graph3d_bar_enabled = graph3d_bar_enabled
+                
+                st.markdown("---")
+                
+                # Create Graphs button
+                if st.button("🎲 Create Graphs", use_container_width=True, key="create_3d_graphs"):
+                    with st.spinner("Generating 3D graphs..."):
+                        st.session_state.graph3d_created = True
+                        st.session_state.graph3d_figures = []
+                        
+                        # Prepare data for 3D plots
+                        # Define the four visualization configurations
+                        viz_configs_3d = [
+                            (filtered_spectra, False, False, "Raw Spectra (No Offset)"),
+                            (prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity), True, False, "Normalized Spectra (No Offset)"),
+                            (filtered_spectra, False, True, "Raw Spectra (With Offset)"),
+                            (prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity), True, True, "Normalized Spectra (With Offset)")
+                        ]
+                        
+                        # Create 3D line plots
+                        for idx, (spectra, normalized, use_offset, title) in enumerate(viz_configs_3d):
+                            # Determine offset values
+                            z_off = graph3d_offset_z if use_offset else 0
+                            x_off = graph3d_offset_x if use_offset else 0
+                            
+                            fig_line = create_3d_line_plot(
+                                spectra,
+                                graph3d_x_label,
+                                graph3d_y_label,
+                                graph3d_z_label,
+                                graph3d_y_values,
+                                z_off,
+                                x_off,
+                                graph3d_offset_y,
+                                x_ranges,
+                                subtract_min_intensity,
+                                fill_area,
+                                fill_alpha,
+                                show_grid,
+                                line_width,
+                                fig_width,
+                                fig_height,
+                                normalized=normalized,
+                                norm_method=norm_method if normalized else None,
+                                norm_range=norm_range if normalized else None,
+                                apply_offset_z=use_offset,
+                                apply_offset_x=use_offset
+                            )
+                            st.session_state.graph3d_figures.append(('line', fig_line, title))
+                        
+                        # Create surface plot if enabled
+                        if graph3d_surface_enabled:
+                            # Use normalized spectra for surface
+                            norm_spectra = prepare_marker_spectra(
+                                filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity
+                            )
+                            fig_surface = create_3d_surface_plot(
+                                norm_spectra,
+                                graph3d_x_label,
+                                graph3d_y_label,
+                                graph3d_z_label,
+                                graph3d_y_values,
+                                graph3d_offset_z,
+                                graph3d_offset_x,
+                                graph3d_offset_y,
+                                x_ranges,
+                                subtract_min_intensity,
+                                show_grid,
+                                line_width,
+                                fig_width,
+                                fig_height,
+                                normalized=True,
+                                norm_method=norm_method,
+                                norm_range=norm_range,
+                                cmap_name='viridis',
+                                alpha=0.8
+                            )
+                            st.session_state.graph3d_figures.append(('surface', fig_surface, "3D Surface Plot"))
+                        
+                        # Create bar plot if enabled
+                        if graph3d_bar_enabled:
+                            # Use normalized spectra for bar plot
+                            norm_spectra = prepare_marker_spectra(
+                                filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity
+                            )
+                            fig_bar = create_3d_bar_plot(
+                                norm_spectra,
+                                graph3d_x_label,
+                                graph3d_y_label,
+                                graph3d_z_label,
+                                graph3d_y_values,
+                                graph3d_offset_z,
+                                graph3d_offset_x,
+                                graph3d_offset_y,
+                                x_ranges,
+                                subtract_min_intensity,
+                                show_grid,
+                                line_width,
+                                fig_width,
+                                fig_height,
+                                normalized=True,
+                                norm_method=norm_method,
+                                norm_range=norm_range,
+                                bar_width=0.8,
+                                alpha=0.7
+                            )
+                            st.session_state.graph3d_figures.append(('bar', fig_bar, "3D Bar/Ribbon Plot"))
+                        
+                        st.success(f"✅ Generated {len(st.session_state.graph3d_figures)} 3D graphs successfully!")
+                        st.rerun()
+                
+                # --- Display 3D Graphs ---
+                if st.session_state.graph3d_created and st.session_state.graph3d_figures:
+                    st.markdown("---")
+                    st.markdown("#### 📊 Generated 3D Graphs")
+                    st.markdown("*Click download button below each plot to save*")
+                    
+                    # Display all generated figures
+                    for idx, (plot_type, fig, title) in enumerate(st.session_state.graph3d_figures):
+                        st.markdown(f"**{title}**")
+                        st.pyplot(fig)
+                        
+                        # Download button for each plot
+                        buf = BytesIO()
+                        fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+                        buf.seek(0)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        plot_name = f"3d_{plot_type}_{idx+1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                            <a href="data:image/png;base64,{b64}" download="{plot_name}">
+                                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                               color: white; border: none; border-radius: 8px; 
+                                               padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.8rem;">
+                                    📥 Download {title} (PNG, 300 dpi)
+                                </button>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        plt.close(fig)
+                    
+                    # Clear graphs button
+                    if st.button("🗑️ Clear All 3D Graphs", use_container_width=True):
+                        st.session_state.graph3d_created = False
+                        st.session_state.graph3d_figures = []
+                        st.rerun()
+                else:
+                    st.info("💡 Configure the settings above and click 'Create Graphs' to generate 3D visualizations.")
+            else:
+                st.warning("⚠️ Please enable '3D Graphs - Create 3D graphs' in the sidebar to use this feature.")
+                st.info("Go to the sidebar and check the box under '3D Graphs' section to enable this tab.")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
         # Export options section
         st.markdown("---")
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -3536,6 +4096,7 @@ Line Width: {line_width}
 Peak Analysis: {analyze_peaks_flag}
 Correlation Analysis: {param_correlation}
 Spectral Markers: {len(st.session_state.spectral_markers)} markers
+3D Graphs Enabled: {st.session_state.enable_3d_graphs}
 """
             st.download_button(
                 label="📄 Export Session Info",
@@ -3560,7 +4121,8 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
         5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
         6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
         7. **Add Markers** - Place vertical lines and regions to track spectral features
-        8. **Export Results** - Download processed data, plots, and analysis results
+        8. **3D Visualization** - Generate 3D line, surface, and bar plots of your spectra
+        9. **Export Results** - Download processed data, plots, and analysis results
         """)
         
         st.markdown("### ✨ Key Features:")
@@ -3573,6 +4135,7 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
         - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
         - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
         - 📏 **Spectral Markers** - Add vertical lines and regions to track peak positions across conditions
+        - 🎲 **3D Visualization** - Generate 3D line, surface, and bar plots with configurable offsets
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
         - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
         - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
