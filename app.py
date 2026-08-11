@@ -89,21 +89,9 @@ if 'spectral_markers_temp_color' not in st.session_state:
     st.session_state.spectral_markers_temp_color = '#000000'
 if 'spectral_markers_show_preview' not in st.session_state:
     st.session_state.spectral_markers_show_preview = True
-# NEW: Cache for spectral markers plot data
-if 'spectral_markers_cached_plot_data' not in st.session_state:
-    st.session_state.spectral_markers_cached_plot_data = None
-# NEW: Flag to force plot update
-if 'spectral_markers_force_update' not in st.session_state:
-    st.session_state.spectral_markers_force_update = False
-# NEW: Temporary marker data for form submission
-if 'spectral_markers_temp_line_position' not in st.session_state:
-    st.session_state.spectral_markers_temp_line_position = None
-if 'spectral_markers_temp_region_width' not in st.session_state:
-    st.session_state.spectral_markers_temp_region_width = None
-if 'spectral_markers_pending_line_index' not in st.session_state:
-    st.session_state.spectral_markers_pending_line_index = -1
-if 'spectral_markers_form_submitted' not in st.session_state:
-    st.session_state.spectral_markers_form_submitted = False
+# NEW: Flag to trigger marker plot update without full rerun
+if 'spectral_markers_update_needed' not in st.session_state:
+    st.session_state.spectral_markers_update_needed = False
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -856,8 +844,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 bbox_anchor = (legend_offset, 0.5)
                 loc = 'center left'
             elif legend_position == "best":
-                bbox_anchor = None
-                loc = 'best'
+                bbox_anchor = None                loc = 'best'
             else:
                 bbox_anchor = None
                 loc = legend_position
@@ -1512,27 +1499,15 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
 
-# NEW FUNCTION: Create spectral markers plot with caching
-@st.cache_data
-def create_spectral_markers_plot_cached(spectra_data_hash, x_label, y_label, offset_step, 
+# NEW FUNCTION: Create spectral markers plot
+def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step, 
                                   fill_area, normalized, use_offset, x_ranges,
                                   subtract_min_intensity, fill_alpha, show_grid,
                                   line_width, fig_width, fig_height, legend_fontsize,
-                                  legend_position, legend_offset, markers_tuple,
+                                  legend_position, legend_offset, markers, 
                                   preview_position, preview_width, show_x_values,
-                                  is_region_mode, show_preview, plot_type_id):
-    """Cached version of spectral markers plot creation"""
-    
-    # Reconstruct spectra_dict from hash (passed as parameter)
-    # This is a simplified version - in practice, we'd use a more sophisticated caching strategy
-    # For now, we'll use the cached data from session state
-    
-    # Since we can't pass complex objects to st.cache_data directly,
-    # we'll retrieve the actual spectra data from session state
-    if 'spectral_markers_cached_data' not in st.session_state:
-        return None
-    
-    spectra_dict = st.session_state.spectral_markers_cached_data['spectra_dict']
+                                  is_region_mode=False, show_preview=True):
+    """Create plot with spectral markers (lines and regions)"""
     
     # Create the base plot using create_individual_plot but without legend
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -1686,8 +1661,7 @@ def create_spectral_markers_plot_cached(spectra_data_hash, x_label, y_label, off
     y_min, y_max = ax.get_ylim()
     y_text_position = y_max + (y_max - y_min) * 0.08  # Position above top edge
     
-    # Draw all markers (convert tuple back to list)
-    markers = list(markers_tuple)
+    # Draw all markers
     for marker in markers:
         # Skip pending markers (they are shown as preview instead)
         if marker.get('pending', False):
@@ -1782,18 +1756,13 @@ def create_spectral_markers_plot_cached(spectra_data_hash, x_label, y_label, off
     
     return fig
 
-# NEW FUNCTION: Get normalized spectra with caching
+# NEW: Cached function to prepare spectra for markers
 @st.cache_data
-def get_normalized_spectra_cached(spectra_dict_hash, norm_method, norm_range, x_ranges, subtract_min_intensity):
-    """Get normalized spectra with caching"""
-    # Retrieve spectra_dict from session state
-    if 'spectral_markers_cached_data' not in st.session_state:
-        return None
-    
-    spectra_dict = st.session_state.spectral_markers_cached_data['spectra_dict']
-    
+def prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity):
+    """Prepare and cache spectra data for markers to avoid recalculation"""
+    # Prepare normalized spectra
     normalized_spectra = {}
-    for name, spec in spectra_dict.items():
+    for name, spec in filtered_spectra.items():
         data = spec['data']
         y_norm = normalize_spectrum(
             data['x'].values,
@@ -3183,7 +3152,7 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
         
 
-        # NEW TAB 5: Spectral Markers (OPTIMIZED VERSION)
+        # NEW TAB 5: Spectral Markers
         with tab5:
             st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
             st.subheader("📏 Spectral Markers")
@@ -3191,51 +3160,10 @@ def main():
             
             # Check if there are spectra to work with
             if filtered_spectra:
-                # Prepare normalized spectra (for selection) - cached
-                # First, check if we need to update the cached data
-                spectra_hash = hash(str(sorted(filtered_spectra.keys())))
-                if 'spectral_markers_cached_data' not in st.session_state or st.session_state.spectral_markers_cached_data.get('hash') != spectra_hash:
-                    # Update cache with current spectra
-                    st.session_state.spectral_markers_cached_data = {
-                        'hash': spectra_hash,
-                        'spectra_dict': filtered_spectra,
-                        'norm_method': norm_method,
-                        'norm_range': norm_range,
-                        'x_ranges': x_ranges,
-                        'subtract_min_intensity': subtract_min_intensity
-                    }
-                
-                # Get normalized spectra (cached)
-                normalized_spectra = get_normalized_spectra_cached(
-                    spectra_hash, norm_method, norm_range, x_ranges, subtract_min_intensity
+                # Prepare normalized spectra using cached function
+                normalized_spectra = prepare_marker_spectra(
+                    filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity
                 )
-                
-                # If cache miss, compute normally
-                if normalized_spectra is None:
-                    normalized_spectra = {}
-                    for name, spec in filtered_spectra.items():
-                        data = spec['data']
-                        y_norm = normalize_spectrum(
-                            data['x'].values,
-                            data['y'].values,
-                            norm_method,
-                            norm_range,
-                            x_ranges
-                        )
-                        normalized_spectra[name] = {
-                            'data': pd.DataFrame({'x': data['x'], 'y': y_norm}),
-                            'color': spec['color']
-                        }
-                    
-                    # Apply subtract minimum intensity if requested
-                    if subtract_min_intensity:
-                        for name in normalized_spectra:
-                            y_vals = normalized_spectra[name]['data']['y'].values
-                            if len(y_vals) > 0:
-                                y_min = y_vals.min()
-                                normalized_spectra[name]['data']['y'] = y_vals - y_min
-                            else:
-                                normalized_spectra[name]['data']['y'] = y_vals
                 
                 # Define the four visualization configurations
                 viz_configs = [
@@ -3284,7 +3212,7 @@ def main():
                         pending_line = marker
                         break
                 
-                # --- Add New Marker Section (FIRST) using Form to avoid reruns ---
+                # --- Add New Marker Section (FIRST) ---
                 st.markdown("---")
                 st.markdown("#### ✏️ Add New Marker")
                 
@@ -3292,58 +3220,53 @@ def main():
                     # --- LINE MODE ---
                     st.info("📍 **Step 1: Add a vertical line**")
                     
-                    # Use a form to group changes
-                    with st.form(key="add_line_form"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            # Position slider for line
-                            marker_position = st.slider(
-                                "Line position (X value)",
-                                min_value=global_min_x,
-                                max_value=global_max_x,
-                                value=(global_min_x + global_max_x) / 2,
-                                step=(global_max_x - global_min_x) / 500,
-                                key="marker_position_slider_form"
-                            )
-                            # Update preview position in session state
-                            st.session_state.spectral_markers_preview_position = marker_position
-                        
-                        with col2:
-                            # Color picker for new marker
-                            marker_color = st.color_picker(
-                                "Marker color",
-                                value=st.session_state.spectral_markers_temp_color,
-                                key="marker_color_picker_form"
-                            )
-                            st.session_state.spectral_markers_temp_color = marker_color
-                        
-                        # Name input
-                        marker_name = st.text_input(
-                            "Marker name (optional)",
-                            value=st.session_state.spectral_markers_temp_name,
-                            placeholder="e.g., I, Peak 1, Marker A",
-                            key="marker_name_input_form"
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        # Position slider for line
+                        marker_position = st.slider(
+                            "Line position (X value)",
+                            min_value=global_min_x,
+                            max_value=global_max_x,
+                            value=(global_min_x + global_max_x) / 2,
+                            step=(global_max_x - global_min_x) / 500,
+                            key="marker_position_slider"
                         )
-                        st.session_state.spectral_markers_temp_name = marker_name
-                        
-                        # Submit button for the form
-                        submitted = st.form_submit_button("➕ Add Line", use_container_width=True)
-                        
-                        if submitted:
-                            # Add a new line marker with pending=True to enable region expansion
-                            new_marker = {
-                                'type': 'line',
-                                'position': marker_position,
-                                'width': 0,
-                                'name': marker_name if marker_name else "",
-                                'color': marker_color,
-                                'pending': True  # This line is pending for region expansion
-                            }
-                            st.session_state.spectral_markers.append(new_marker)
-                            st.session_state.spectral_markers_temp_name = ""
-                            st.session_state.spectral_markers_force_update = True
-                            st.success(f"✅ Line added at position {marker_position:.1f}. Now you can expand it to a region!")
-                            # No st.rerun() - form submission handles it
+                        # Update preview position
+                        st.session_state.spectral_markers_preview_position = marker_position
+                    
+                    with col2:
+                        # Color picker for new marker
+                        marker_color = st.color_picker(
+                            "Marker color",
+                            value=st.session_state.spectral_markers_temp_color,
+                            key="marker_color_picker"
+                        )
+                        st.session_state.spectral_markers_temp_color = marker_color
+                    
+                    # Name input
+                    marker_name = st.text_input(
+                        "Marker name (optional)",
+                        value=st.session_state.spectral_markers_temp_name,
+                        placeholder="e.g., I, Peak 1, Marker A",
+                        key="marker_name_input"
+                    )
+                    st.session_state.spectral_markers_temp_name = marker_name
+                    
+                    # Add Line button - WITHOUT rerun
+                    if st.button("➕ Add Line", use_container_width=True):
+                        # Add a new line marker with pending=True to enable region expansion
+                        new_marker = {
+                            'type': 'line',
+                            'position': marker_position,
+                            'width': 0,
+                            'name': marker_name if marker_name else "",
+                            'color': marker_color,
+                            'pending': True  # This line is pending for region expansion
+                        }
+                        st.session_state.spectral_markers.append(new_marker)
+                        st.session_state.spectral_markers_temp_name = ""
+                        st.session_state.spectral_markers_update_needed = True
+                        st.success(f"✅ Line added at position {marker_position:.1f}. Now you can expand it to a region!")
                     
                     # Display info about existing markers
                     if st.session_state.spectral_markers:
@@ -3355,50 +3278,44 @@ def main():
                     st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region**")
                     st.markdown("*Use the slider below to set the region width (half-width on each side)*")
                     
-                    # Use a form for region confirmation
-                    with st.form(key="region_form"):
-                        # Width slider for region
-                        region_width = st.slider(
-                            "Region half-width",
-                            min_value=0.1,
-                            max_value=(global_max_x - global_min_x) / 4,
-                            value=min(5.0, (global_max_x - global_min_x) / 20),
-                            step=0.1,
-                            key="region_width_slider_form"
-                        )
-                        st.session_state.spectral_markers_preview_width = region_width
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            confirm_region = st.form_submit_button("✅ Confirm Region", use_container_width=True)
-                            if confirm_region:
-                                # Convert pending line to region
-                                for i, marker in enumerate(st.session_state.spectral_markers):
-                                    if marker.get('pending', False):
-                                        st.session_state.spectral_markers[i]['type'] = 'region'
-                                        st.session_state.spectral_markers[i]['width'] = region_width
-                                        st.session_state.spectral_markers[i]['pending'] = False
-                                        st.session_state.spectral_markers_force_update = True
-                                        st.success(f"✅ Region added: center={marker['position']:.1f}, half-width={region_width:.1f}")
-                                        st.session_state.spectral_markers_preview_width = 0
-                                        # No st.rerun() - form submission handles it
-                                        break
-                        
-                        with col2:
-                            cancel_region = st.form_submit_button("❌ Cancel Region", use_container_width=True)
-                            if cancel_region:
-                                # Remove the pending marker (keep it as a line)
-                                for i, marker in enumerate(st.session_state.spectral_markers):
-                                    if marker.get('pending', False):
-                                        st.session_state.spectral_markers[i]['pending'] = False
-                                        st.session_state.spectral_markers[i]['type'] = 'line'
-                                        st.session_state.spectral_markers_force_update = True
-                                        st.info(f"⏹️ Line kept at position {marker['position']:.1f} (not expanded to region)")
-                                        st.session_state.spectral_markers_preview_width = 0
-                                        # No st.rerun() - form submission handles it
-                                        break
+                    # Width slider for region
+                    region_width = st.slider(
+                        "Region half-width",
+                        min_value=0.1,
+                        max_value=(global_max_x - global_min_x) / 4,
+                        value=min(5.0, (global_max_x - global_min_x) / 20),
+                        step=0.1,
+                        key="region_width_slider"
+                    )
+                    st.session_state.spectral_markers_preview_width = region_width
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✅ Confirm Region", use_container_width=True):
+                            # Convert pending line to region
+                            for i, marker in enumerate(st.session_state.spectral_markers):
+                                if marker.get('pending', False):
+                                    st.session_state.spectral_markers[i]['type'] = 'region'
+                                    st.session_state.spectral_markers[i]['width'] = region_width
+                                    st.session_state.spectral_markers[i]['pending'] = False
+                                    st.session_state.spectral_markers_update_needed = True
+                                    st.success(f"✅ Region added: center={marker['position']:.1f}, half-width={region_width:.1f}")
+                                    st.session_state.spectral_markers_preview_width = 0
+                                    break
+                    
+                    with col2:
+                        if st.button("❌ Cancel Region", use_container_width=True):
+                            # Remove the pending marker (keep it as a line)
+                            for i, marker in enumerate(st.session_state.spectral_markers):
+                                if marker.get('pending', False):
+                                    st.session_state.spectral_markers[i]['pending'] = False
+                                    st.session_state.spectral_markers[i]['type'] = 'line'
+                                    st.session_state.spectral_markers_update_needed = True
+                                    st.info(f"⏹️ Line kept at position {marker['position']:.1f} (not expanded to region)")
+                                    st.session_state.spectral_markers_preview_width = 0
+                                    break
                 
-                # --- Plot with Markers (SECOND) - Use cached version ---
+                # --- PLOT WITH MARKERS (SECOND) ---
                 st.markdown("---")
                 st.markdown("#### 📊 Plot with Markers")
                 
@@ -3423,87 +3340,46 @@ def main():
                     if not show_preview:
                         st.caption("🔒 Preview hidden. All markers are confirmed.")
                 
-                # Add "Update Plot" button instead of automatic refresh
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    update_plot = st.button("🔄 Update Plot", use_container_width=True, key="update_markers_plot")
-                    if update_plot:
-                        st.session_state.spectral_markers_force_update = True
+                # Create the plot
+                fig_markers = create_spectral_markers_plot(
+                    selected_spectra, x_label, selected_yl,
+                    selected_offset_step, selected_fill, selected_normalized,
+                    selected_use_offset, x_ranges, subtract_min_intensity,
+                    fill_alpha, show_grid, line_width, fig_width, fig_height,
+                    cached['legend_fontsize'], cached['legend_position'],
+                    cached['legend_offset'],
+                    st.session_state.spectral_markers,
+                    st.session_state.spectral_markers_preview_position,
+                    st.session_state.spectral_markers_preview_width,
+                    st.session_state.spectral_markers_show_values,
+                    pending_line is not None,
+                    st.session_state.spectral_markers_show_preview
+                )
                 
-                # Determine if we need to create a new plot or use cached
-                # Create a hash of current state for caching
-                markers_tuple = tuple(tuple(m.items()) for m in st.session_state.spectral_markers)
-                plot_type_id = f"{selected_plot_idx}_{st.session_state.spectral_markers_show_values}_{st.session_state.spectral_markers_show_preview}"
+                # Display the plot
+                st.pyplot(fig_markers)
                 
-                # Check if we have a cached plot
-                cached_plot_key = f"markers_plot_{plot_type_id}_{hash(markers_tuple)}"
+                # Download button for the plot
+                buf = BytesIO()
+                fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+                buf.seek(0)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                st.markdown(f"""
+                <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+                    <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                        <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                       color: white; border: none; border-radius: 8px; 
+                                       padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                            📥 Download Plot with Markers (PNG, 600 dpi)
+                        </button>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+                plt.close(fig_markers)
                 
-                # Create the plot (cached if possible)
-                with st.spinner("Generating plot with markers..."):
-                    # Store current spectra in session state for caching
-                    st.session_state.spectral_markers_cached_data['spectra_dict'] = selected_spectra
-                    
-                    # Try to get cached plot
-                    fig_markers = create_spectral_markers_plot_cached(
-                        spectra_hash,
-                        x_label, selected_yl,
-                        selected_offset_step, selected_fill, selected_normalized,
-                        selected_use_offset, x_ranges, subtract_min_intensity,
-                        fill_alpha, show_grid, line_width, fig_width, fig_height,
-                        cached['legend_fontsize'], cached['legend_position'],
-                        cached['legend_offset'],
-                        markers_tuple,
-                        st.session_state.spectral_markers_preview_position,
-                        st.session_state.spectral_markers_preview_width,
-                        st.session_state.spectral_markers_show_values,
-                        pending_line is not None,
-                        st.session_state.spectral_markers_show_preview,
-                        plot_type_id
-                    )
-                    
-                    # If cache miss, create plot normally
-                    if fig_markers is None:
-                        # Fallback to direct creation
-                        fig_markers = create_spectral_markers_plot_cached(
-                            spectra_hash,
-                            x_label, selected_yl,
-                            selected_offset_step, selected_fill, selected_normalized,
-                            selected_use_offset, x_ranges, subtract_min_intensity,
-                            fill_alpha, show_grid, line_width, fig_width, fig_height,
-                            cached['legend_fontsize'], cached['legend_position'],
-                            cached['legend_offset'],
-                            markers_tuple,
-                            st.session_state.spectral_markers_preview_position,
-                            st.session_state.spectral_markers_preview_width,
-                            st.session_state.spectral_markers_show_values,
-                            pending_line is not None,
-                            st.session_state.spectral_markers_show_preview,
-                            plot_type_id
-                        )
-                
-                # Display the plot if it was created
-                if fig_markers is not None:
-                    st.pyplot(fig_markers)
-                    
-                    # Download button for the plot
-                    buf = BytesIO()
-                    fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
-                    buf.seek(0)
-                    b64 = base64.b64encode(buf.getvalue()).decode()
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 0.5rem;">
-                        <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
-                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                           color: white; border: none; border-radius: 8px; 
-                                           padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
-                                📥 Download Plot with Markers (PNG, 600 dpi)
-                            </button>
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    plt.close(fig_markers)
-                else:
-                    st.error("Failed to generate plot with markers. Please try again.")
+                # Reset update flag if it was set
+                if st.session_state.spectral_markers_update_needed:
+                    st.session_state.spectral_markers_update_needed = False
                 
                 # --- Display and manage existing markers (THIRD) ---
                 if st.session_state.spectral_markers:
@@ -3556,18 +3432,16 @@ def main():
                                     st.markdown(f"<div style='width:20px;height:20px;background-color:{row['Color']};border:1px solid #ccc;border-radius:3px;'></div>", unsafe_allow_html=True)
                                 with col7:
                                     if st.button("🗑️", key=f"delete_marker_{row['index']}"):
-                                        # Remove marker - no rerun needed
+                                        # Remove marker
                                         st.session_state.spectral_markers.pop(row['index'])
-                                        st.session_state.spectral_markers_force_update = True
-                                        # st.rerun() removed
+                                        st.session_state.spectral_markers_update_needed = True
                             
                             # Clear all markers button
                             if st.button("🗑️ Clear All Markers", use_container_width=True):
                                 st.session_state.spectral_markers = []
                                 st.session_state.spectral_markers_preview_position = None
                                 st.session_state.spectral_markers_preview_width = 0
-                                st.session_state.spectral_markers_force_update = True
-                                # st.rerun() removed
+                                st.session_state.spectral_markers_update_needed = True
                     else:
                         st.info("No confirmed markers yet. Use the controls above to add lines or regions.")
                 else:
