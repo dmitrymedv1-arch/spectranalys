@@ -844,7 +844,8 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
                 bbox_anchor = (legend_offset, 0.5)
                 loc = 'center left'
             elif legend_position == "best":
-                bbox_anchor = None                loc = 'best'
+                bbox_anchor = None                
+                loc = 'best'
             else:
                 bbox_anchor = None
                 loc = legend_position
