@@ -1076,11 +1076,22 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     # Prepare data for spectrum A
     x_a = spectrum_a_data['data']['x'].values
     y_a_raw = spectrum_a_data['data']['y'].values
-    y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
     
     # Prepare data for spectrum B
     x_b = spectrum_b_data['data']['x'].values
     y_b_raw = spectrum_b_data['data']['y'].values
+    
+    # Convert to numpy arrays if needed (for ArrowStringArray compatibility)
+    if not isinstance(x_a, np.ndarray):
+        x_a = np.array(x_a)
+    if not isinstance(x_b, np.ndarray):
+        x_b = np.array(x_b)
+    if not isinstance(y_a_raw, np.ndarray):
+        y_a_raw = np.array(y_a_raw)
+    if not isinstance(y_b_raw, np.ndarray):
+        y_b_raw = np.array(y_b_raw)
+    
+    y_a_norm = normalize_spectrum(x_a, y_a_raw, norm_method, norm_range)
     y_b_norm = normalize_spectrum(x_b, y_b_raw, norm_method, norm_range)
     
     # Interpolate both spectra to common x grid
@@ -1134,7 +1145,6 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     ax_top.set_xlabel(x_label, fontsize=10, fontweight='bold')
     ax_top.set_ylabel("Norm. Intensity", fontsize=10, fontweight='bold')
-    # REMOVED: ax_top.set_title(...)
     
     # Legend for top plot
     handles = ax_top.get_legend_handles_labels()[0]
@@ -1168,9 +1178,6 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
         y_max = np.max(y_diff_smoothed)
         y_margin = (y_max - y_min) * 0.1
         ax_bottom.set_ylim(y_min - y_margin, y_max + y_margin)
-    
-    # Create filled polygons between curve and zero line with colormap-based colors
-    # We need to create segmented fills where each segment's color corresponds to its y-value
     
     # Create a colormap object
     cmap = plt.get_cmap(colormap_name)
@@ -1243,7 +1250,6 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
     
     ax_bottom.set_xlabel(x_label, fontsize=10, fontweight='bold')
     ax_bottom.set_ylabel('Intensity Diff.', fontsize=10, fontweight='bold')
-    # REMOVED: ax_bottom.set_title(...)
     
     ax_bottom.tick_params(direction='in', length=5, width=1)
     if show_grid:
