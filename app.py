@@ -362,10 +362,16 @@ plt.rcParams.update({
 # Function to load spectrum data
 @st.cache_data
 def load_spectrum(uploaded_file):
-    """Load spectrum from uploaded file"""
+    """Load spectrum from uploaded file (supports tab or space separated)"""
     try:
         content = uploaded_file.getvalue().decode('utf-8')
-        data = pd.read_csv(StringIO(content), sep='\t', header=None, names=['x', 'y'])
+        # Try reading with tab separator first
+        try:
+            data = pd.read_csv(StringIO(content), sep='\t', header=None, names=['x', 'y'])
+        except:
+            # If tab fails, try with whitespace (any number of spaces)
+            data = pd.read_csv(StringIO(content), sep='\s+', header=None, names=['x', 'y'])
+        
         # Clean data - remove NaN and inf values
         data = data.dropna()
         data = data.replace([np.inf, -np.inf], np.nan).dropna()
