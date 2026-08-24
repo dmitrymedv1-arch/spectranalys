@@ -365,12 +365,8 @@ def load_spectrum(uploaded_file):
     """Load spectrum from uploaded file (supports tab or space separated)"""
     try:
         content = uploaded_file.getvalue().decode('utf-8')
-        # Try reading with tab separator first
-        try:
-            data = pd.read_csv(StringIO(content), sep='\t', header=None, names=['x', 'y'])
-        except:
-            # If tab fails, try with whitespace (any number of spaces)
-            data = pd.read_csv(StringIO(content), sep='\s+', header=None, names=['x', 'y'])
+        # Используем \s+ - один или несколько пробелов/табуляций
+        data = pd.read_csv(StringIO(content), sep='\s+', header=None, names=['x', 'y'])
         
         # Clean data - remove NaN and inf values
         data = data.dropna()
