@@ -2776,8 +2776,25 @@ def main():
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to apply gradient colors. Please try again.")
+
+                    # Automatically assign default colors to spectra if not already assigned
+                    default_colors = [
+                        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+                    ]
                     
-                    # Color Assignment (existing section, moved to bottom as requested)
+                    # Assign default colors to any spectrum that doesn't have a color
+                    for i, name in enumerate(ordered_spectra):
+                        if name in spectra_data and spectra_data[name].get('color') is None:
+                            spectra_data[name]['color'] = default_colors[i % len(default_colors)]
+                    
+                    # Also check if gradient is applied and colors are in cache
+                    if st.session_state.gradient_applied and st.session_state.gradient_colors_cache:
+                        for name in ordered_spectra:
+                            if name in spectra_data and name in st.session_state.gradient_colors_cache:
+                                spectra_data[name]['color'] = st.session_state.gradient_colors_cache[name]
+                    
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
                     st.markdown("*Manually adjust individual spectrum colors (after applying gradient if needed)*")
