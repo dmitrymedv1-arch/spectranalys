@@ -2878,9 +2878,6 @@ def main():
                             # Если цвет не был назначен, назначаем цвет по умолчанию
                             default_color = default_colors[i % len(default_colors)]
                             spectra_data[name]['color'] = default_color
-                            # Обновляем cached_spectra_data, если он существует
-                            if st.session_state.cached_spectra_data is not None:
-                                st.session_state.cached_spectra_data['spectra_data'] = spectra_data
                                 
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
