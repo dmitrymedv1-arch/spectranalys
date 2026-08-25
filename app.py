@@ -121,6 +121,8 @@ if 'gradient_applied' not in st.session_state:
     st.session_state.gradient_applied = False
 if 'gradient_colors_cache' not in st.session_state:
     st.session_state.gradient_colors_cache = {}  # Cache for gradient colors {name: hex_color}
+if 'manual_colors' not in st.session_state:
+    st.session_state.manual_colors = set()
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -2760,6 +2762,7 @@ def main():
                                 # Store gradient colors in session state
                                 st.session_state.gradient_colors_cache = gradient_colors
                                 st.session_state.gradient_applied = True
+                                st.session_state.gradient_palette = selected_gradient_palette
                                 
                                 # Apply gradient colors to spectra_data
                                 for name, hex_color in gradient_colors.items():
@@ -2771,6 +2774,7 @@ def main():
                                     st.session_state.cached_spectra_data['spectra_data'] = spectra_data
                                     st.session_state.cached_spectra_data['gradient_applied'] = True
                                     st.session_state.cached_spectra_data['gradient_palette'] = selected_gradient_palette
+                                    st.session_state.cached_spectra_data['gradient_colors_cache'] = gradient_colors
                                 
                                 st.success(f"✅ Gradient colors applied using {gradient_palettes[selected_gradient_palette]}!")
                                 st.rerun()
@@ -2806,34 +2810,70 @@ def main():
                         '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
                     ]
                     
+                    # FIRST PASS: Collect all current colors from spectra_data
+                    # This preserves manual changes
+                    current_colors = {}
+                    for i, name in enumerate(ordered_spectra):
+                        # Priority 1: If gradient is applied, use gradient colors as base
+                        if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
+                            base_color = st.session_state.gradient_colors_cache[name]
+                        else:
+                            # Priority 2: Use existing color from spectra_data
+                            base_color = spectra_data.get(name, {}).get('color', default_colors[i % len(default_colors)])
+                        
+                        # Priority 3: If there's a manually changed color in spectra_data, use it
+                        # (this overrides gradient for that specific spectrum)
+                        if name in spectra_data and spectra_data[name].get('color') is not None:
+                            # Check if this is a manual change (not from gradient)
+                            # If gradient is applied, but spectra_data color differs from gradient cache,
+                            # it means user manually changed it
+                            if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
+                                if spectra_data[name]['color'] != st.session_state.gradient_colors_cache[name]:
+                                    base_color = spectra_data[name]['color']
+                            else:
+                                base_color = spectra_data[name]['color']
+                        
+                        current_colors[name] = base_color
+                    
+                    # SECOND PASS: Display color pickers with current colors
                     colors = {}
                     for i, name in enumerate(ordered_spectra):
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.markdown(f"**{name.replace('.txt', '')}**")
                         with col2:
-                            # Determine which color to use:
-                            # 1. If gradient is applied, use gradient color from cache
-                            # 2. Otherwise use current color from spectra_data
-                            # 3. Fallback to default color
-                            if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
-                                current_color = st.session_state.gradient_colors_cache[name]
-                            else:
-                                current_color = spectra_data.get(name, {}).get('color', default_colors[i % len(default_colors)])
-                            
                             colors[name] = st.color_picker(
                                 f"Color {i+1}",
-                                value=current_color,
+                                value=current_colors[name],
                                 key=f"color_{name}"
                             )
                     
-                    # Update spectra data with colors (manual assignments)
+                    # THIRD PASS: Update spectra data with colors (preserving manual changes)
                     for name in ordered_spectra:
                         if name in colors:
+                            # Store the color in spectra_data
                             spectra_data[name]['color'] = colors[name]
-                            # If user manually changes a color, update the cache too
-                            if name in st.session_state.gradient_colors_cache:
+                            
+                            # Also update gradient cache if gradient is applied
+                            # This ensures gradient cache stays in sync with manual changes
+                            if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
                                 st.session_state.gradient_colors_cache[name] = colors[name]
+                            
+                            # If user manually changed a color, mark it so we know it's manual
+                            # This prevents it from being overwritten by gradient
+                            if not hasattr(st.session_state, 'manual_colors'):
+                                st.session_state.manual_colors = set()
+                            if colors[name] != st.session_state.gradient_colors_cache.get(name, ''):
+                                st.session_state.manual_colors.add(name)
+                            else:
+                                # If color matches gradient, remove from manual set
+                                if name in st.session_state.manual_colors:
+                                    st.session_state.manual_colors.remove(name)
+                    
+                    # Update cached data with new colors
+                    if st.session_state.cached_spectra_data is not None:
+                        st.session_state.cached_spectra_data['spectra_data'] = spectra_data
+                        st.session_state.cached_spectra_data['gradient_colors_cache'] = st.session_state.gradient_colors_cache
                         else:
                             # Если цвет не был назначен, назначаем цвет по умолчанию
                             default_color = default_colors[i % len(default_colors)]
