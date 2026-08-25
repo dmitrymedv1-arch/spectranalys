@@ -116,13 +116,13 @@ if 'graph3d_created' not in st.session_state:
 
 # NEW: Gradient colors session state variables
 if 'gradient_palette' not in st.session_state:
-    st.session_state.gradient_palette = 'RdYlBu'
+    st.session_state.gradient_palette = 'coolwarm'
 if 'gradient_applied' not in st.session_state:
     st.session_state.gradient_applied = False
 if 'gradient_colors_cache' not in st.session_state:
     st.session_state.gradient_colors_cache = {}  # Cache for gradient colors {name: hex_color}
 if 'manual_colors' not in st.session_state:
-    st.session_state.manual_colors = set()
+    st.session_state.manual_colors = set()  # Track which colors were manually changed
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -2723,19 +2723,17 @@ def main():
                     st.markdown("### 🎨 Gradient Color Assignment")
                     st.markdown("*Automatically assign colors to spectra using a gradient palette*")
                     
-                    # Define gradient palettes
+                    # Define gradient palettes (10 options) - replaced with more sophisticated palettes
                     gradient_palettes = {
-                        'Reds_r': 'Red gradient (reversed)',
-                        'RdBu_r': 'Red-Blue (diverging, reversed)',
-                        'turbo': 'Turbo (improved jet)',
-                        'twilight_shifted': 'Twilight Shifted (blue-red-purple)',
-                        'Spectral': 'Spectral (rainbow)',
                         'coolwarm': 'Cool-Warm (diverging)',
+                        'RdBu_r': 'Red-Blue (diverging, reversed)',
+                        'RdYlBu_r': 'Red-Yellow-Blue (diverging, reversed)',
+                        'PiYG': 'Pink-Yellow-Green (diverging)',
+                        'PRGn': 'Purple-Red-Green (diverging)',
+                        'BrBG': 'Brown-Blue-Green (diverging)',
+                        'Spectral_r': 'Spectral (rainbow, reversed)',
                         'viridis': 'Viridis (perceptual)',
                         'plasma': 'Plasma (perceptual)',
-                        'inferno': 'Inferno (perceptual)',
-                        'magma': 'Magma (perceptual)',
-                        'BrBG': 'Brown-Blue-Green (diverging)',
                         'twilight_shifted': 'Twilight Shifted (cyclic)'
                     }
                     
@@ -2744,7 +2742,7 @@ def main():
                         "Select gradient palette",
                         options=list(gradient_palettes.keys()),
                         format_func=lambda x: gradient_palettes[x],
-                        index=3,  # Default to 'RdYlBu'
+                        index=0,  # Default to 'coolwarm'
                         key="gradient_palette_select"
                     )
                     st.session_state.gradient_palette = selected_gradient_palette
@@ -2831,25 +2829,8 @@ def main():
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to apply gradient colors. Please try again.")
-
-                    # Automatically assign default colors to spectra if not already assigned
-                    default_colors = [
-                        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-                        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
-                    ]
                     
-                    # Assign default colors to any spectrum that doesn't have a color
-                    for i, name in enumerate(ordered_spectra):
-                        if name in spectra_data and spectra_data[name].get('color') is None:
-                            spectra_data[name]['color'] = default_colors[i % len(default_colors)]
-                    
-                    # Also check if gradient is applied and colors are in cache
-                    if st.session_state.gradient_applied and st.session_state.gradient_colors_cache:
-                        for name in ordered_spectra:
-                            if name in spectra_data and name in st.session_state.gradient_colors_cache:
-                                spectra_data[name]['color'] = st.session_state.gradient_colors_cache[name]
-                    
+                    # Color Assignment (existing section, moved to bottom as requested)
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
                     st.markdown("*Manually adjust individual spectrum colors (after applying gradient if needed)*")
@@ -2904,27 +2885,7 @@ def main():
                     if st.session_state.cached_spectra_data is not None:
                         st.session_state.cached_spectra_data['spectra_data'] = spectra_data.copy()
                         st.session_state.cached_spectra_data['gradient_colors_cache'] = st.session_state.gradient_colors_cache.copy()
-                            
-                            # If user manually changed a color, mark it so we know it's manual
-                            # This prevents it from being overwritten by gradient
-                            if not hasattr(st.session_state, 'manual_colors'):
-                                st.session_state.manual_colors = set()
-                            if colors[name] != st.session_state.gradient_colors_cache.get(name, ''):
-                                st.session_state.manual_colors.add(name)
-                            else:
-                                # If color matches gradient, remove from manual set
-                                if name in st.session_state.manual_colors:
-                                    st.session_state.manual_colors.remove(name)
                     
-                    # Update cached data with new colors
-                    if st.session_state.cached_spectra_data is not None:
-                        st.session_state.cached_spectra_data['spectra_data'] = spectra_data
-                        st.session_state.cached_spectra_data['gradient_colors_cache'] = st.session_state.gradient_colors_cache
-                    else:
-                        # Если цвет не был назначен, назначаем цвет по умолчанию
-                        default_color = default_colors[i % len(default_colors)]
-                        spectra_data[name]['color'] = default_color
-                                
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
                     st.session_state.cached_spectra_data = {
