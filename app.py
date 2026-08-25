@@ -2874,10 +2874,10 @@ def main():
                     if st.session_state.cached_spectra_data is not None:
                         st.session_state.cached_spectra_data['spectra_data'] = spectra_data
                         st.session_state.cached_spectra_data['gradient_colors_cache'] = st.session_state.gradient_colors_cache
-                        else:
-                            # Если цвет не был назначен, назначаем цвет по умолчанию
-                            default_color = default_colors[i % len(default_colors)]
-                            spectra_data[name]['color'] = default_color
+                    else:
+                        # Если цвет не был назначен, назначаем цвет по умолчанию
+                        default_color = default_colors[i % len(default_colors)]
+                        spectra_data[name]['color'] = default_color
                                 
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
