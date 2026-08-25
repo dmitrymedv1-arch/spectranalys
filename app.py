@@ -119,6 +119,8 @@ if 'gradient_palette' not in st.session_state:
     st.session_state.gradient_palette = 'RdYlBu'
 if 'gradient_applied' not in st.session_state:
     st.session_state.gradient_applied = False
+if 'gradient_colors_cache' not in st.session_state:
+    st.session_state.gradient_colors_cache = {}  # Cache for gradient colors {name: hex_color}
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -2013,10 +2015,16 @@ def create_3d_line_plot(X, Y, Z, colors, x_label, y_label, z_label,
     return fig
 
 # NEW: Function to apply gradient colors to spectra
-def apply_gradient_colors(ordered_spectra, palette_name, spectra_data, default_colors):
-    """Apply gradient colors to spectra based on selected palette"""
-    if not ordered_spectra or not spectra_data:
-        return spectra_data
+def apply_gradient_colors(ordered_spectra, palette_name):
+    """Generate gradient colors for spectra based on selected palette
+    
+    Returns:
+        dict: Dictionary mapping spectrum names to hex colors
+    """
+    if not ordered_spectra:
+        return {}
+    
+    gradient_colors = {}
     
     try:
         # Get colormap from matplotlib
@@ -2031,27 +2039,21 @@ def apply_gradient_colors(ordered_spectra, palette_name, spectra_data, default_c
             # Linear interpolation from 0 to 1
             colors_rgba = [cmap(i / (n_spectra - 1)) for i in range(n_spectra)]
         
-        # Convert RGBA to hex
-        colors_hex = []
-        for rgba in colors_rgba:
+        # Convert RGBA to hex and assign to spectra
+        for i, name in enumerate(ordered_spectra):
+            rgba = colors_rgba[i % len(colors_rgba)]
             # Convert to hex
             r = int(rgba[0] * 255)
             g = int(rgba[1] * 255)
             b = int(rgba[2] * 255)
             hex_color = f'#{r:02x}{g:02x}{b:02x}'
-            colors_hex.append(hex_color)
+            gradient_colors[name] = hex_color
         
-        # Assign colors to spectra in order
-        for i, name in enumerate(ordered_spectra):
-            if name in spectra_data:
-                spectra_data[name]['color'] = colors_hex[i % len(colors_hex)]
-        
-        st.session_state.gradient_applied = True
+        return gradient_colors
         
     except Exception as e:
         st.error(f"Error applying gradient colors: {e}")
-    
-    return spectra_data
+        return {}
 
 # Main app
 def main():
@@ -2746,15 +2748,32 @@ def main():
                     # Apply gradient colors button
                     if st.button("🎨 Apply gradient colors", use_container_width=True, key="apply_gradient_colors"):
                         with st.spinner("Applying gradient colors..."):
-                            # Apply gradient colors to spectra
-                            spectra_data = apply_gradient_colors(
+                            # Generate gradient colors
+                            gradient_colors = apply_gradient_colors(
                                 ordered_spectra,
-                                selected_gradient_palette,
-                                spectra_data,
-                                []  # default_colors not needed here
+                                selected_gradient_palette
                             )
-                            st.success(f"✅ Gradient colors applied using {gradient_palettes[selected_gradient_palette]}!")
-                            st.rerun()
+                            
+                            if gradient_colors:
+                                # Store gradient colors in session state
+                                st.session_state.gradient_colors_cache = gradient_colors
+                                st.session_state.gradient_applied = True
+                                
+                                # Apply gradient colors to spectra_data
+                                for name, hex_color in gradient_colors.items():
+                                    if name in spectra_data:
+                                        spectra_data[name]['color'] = hex_color
+                                
+                                # Update cached data with new colors
+                                if st.session_state.cached_spectra_data is not None:
+                                    st.session_state.cached_spectra_data['spectra_data'] = spectra_data
+                                    st.session_state.cached_spectra_data['gradient_applied'] = True
+                                    st.session_state.cached_spectra_data['gradient_palette'] = selected_gradient_palette
+                                
+                                st.success(f"✅ Gradient colors applied using {gradient_palettes[selected_gradient_palette]}!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to apply gradient colors. Please try again.")
                     
                     # Color Assignment (existing section, moved to bottom as requested)
                     st.markdown("---")
@@ -2774,8 +2793,15 @@ def main():
                         with col1:
                             st.markdown(f"**{name.replace('.txt', '')}**")
                         with col2:
-                            # Use the current color from spectra_data if available, otherwise default
-                            current_color = spectra_data.get(name, {}).get('color', default_colors[i % len(default_colors)])
+                            # Determine which color to use:
+                            # 1. If gradient is applied, use gradient color from cache
+                            # 2. Otherwise use current color from spectra_data
+                            # 3. Fallback to default color
+                            if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
+                                current_color = st.session_state.gradient_colors_cache[name]
+                            else:
+                                current_color = spectra_data.get(name, {}).get('color', default_colors[i % len(default_colors)])
+                            
                             colors[name] = st.color_picker(
                                 f"Color {i+1}",
                                 value=current_color,
@@ -2786,6 +2812,9 @@ def main():
                     for name in ordered_spectra:
                         if name in colors:
                             spectra_data[name]['color'] = colors[name]
+                            # If user manually changes a color, update the cache too
+                            if name in st.session_state.gradient_colors_cache:
+                                st.session_state.gradient_colors_cache[name] = colors[name]
                     
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
@@ -2833,7 +2862,8 @@ def main():
                         'graph3d_created': st.session_state.graph3d_created,
                         # NEW: Gradient colors settings
                         'gradient_palette': st.session_state.gradient_palette,
-                        'gradient_applied': st.session_state.gradient_applied
+                        'gradient_applied': st.session_state.gradient_applied,
+                        'gradient_colors_cache': st.session_state.gradient_colors_cache
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
