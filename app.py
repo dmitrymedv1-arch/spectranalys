@@ -2721,18 +2721,21 @@ def main():
                     st.markdown("### 🎨 Gradient Color Assignment")
                     st.markdown("*Automatically assign colors to spectra using a gradient palette*")
                     
-                    # Define gradient palettes (10 options)
+                    # Define gradient palettes
                     gradient_palettes = {
                         'Blues': 'Blues (blue gradient)',
-                        'Reds': 'Reds (red gradient)',
-                        'Greens': 'Greens (green gradient)',
-                        'RdYlBu': 'Red-Yellow-Blue (diverging)',
+                        'Reds_r': 'Red gradient (reversed)',
+                        'RdBu_r': 'Red-Blue (diverging, reversed)',
+                        'turbo': 'Turbo (improved jet)',
+                        'twilight_shifted': 'Twilight Shifted (blue-red-purple)',
                         'Spectral': 'Spectral (rainbow)',
                         'coolwarm': 'Cool-Warm (diverging)',
                         'viridis': 'Viridis (perceptual)',
                         'plasma': 'Plasma (perceptual)',
                         'inferno': 'Inferno (perceptual)',
-                        'magma': 'Magma (perceptual)'
+                        'magma': 'Magma (perceptual)',
+                        'BrBG': 'Brown-Blue-Green (diverging)',
+                        'twilight_shifted': 'Twilight Shifted (cyclic)'
                     }
                     
                     # Select gradient palette
