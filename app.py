@@ -2817,7 +2817,14 @@ def main():
                             # If user manually changes a color, update the cache too
                             if name in st.session_state.gradient_colors_cache:
                                 st.session_state.gradient_colors_cache[name] = colors[name]
-                    
+                        else:
+                            # Если цвет не был назначен, назначаем цвет по умолчанию
+                            default_color = default_colors[i % len(default_colors)]
+                            spectra_data[name]['color'] = default_color
+                            # Обновляем cached_spectra_data, если он существует
+                            if st.session_state.cached_spectra_data is not None:
+                                st.session_state.cached_spectra_data['spectra_data'] = spectra_data
+                                
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
                     st.session_state.cached_spectra_data = {
