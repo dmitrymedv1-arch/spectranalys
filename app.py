@@ -2723,7 +2723,6 @@ def main():
                     
                     # Define gradient palettes
                     gradient_palettes = {
-                        'Blues': 'Blues (blue gradient)',
                         'Reds_r': 'Red gradient (reversed)',
                         'RdBu_r': 'Red-Blue (diverging, reversed)',
                         'turbo': 'Turbo (improved jet)',
