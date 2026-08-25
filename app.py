@@ -114,6 +114,12 @@ if 'graph3d_params' not in st.session_state:
 if 'graph3d_created' not in st.session_state:
     st.session_state.graph3d_created = False
 
+# NEW: Gradient colors session state variables
+if 'gradient_palette' not in st.session_state:
+    st.session_state.gradient_palette = 'RdYlBu'
+if 'gradient_applied' not in st.session_state:
+    st.session_state.gradient_applied = False
+
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
     try:
@@ -2006,6 +2012,47 @@ def create_3d_line_plot(X, Y, Z, colors, x_label, y_label, z_label,
     plt.tight_layout()
     return fig
 
+# NEW: Function to apply gradient colors to spectra
+def apply_gradient_colors(ordered_spectra, palette_name, spectra_data, default_colors):
+    """Apply gradient colors to spectra based on selected palette"""
+    if not ordered_spectra or not spectra_data:
+        return spectra_data
+    
+    try:
+        # Get colormap from matplotlib
+        cmap = plt.get_cmap(palette_name)
+        
+        # Generate N colors from the colormap (N = number of spectra)
+        n_spectra = len(ordered_spectra)
+        if n_spectra == 1:
+            # If only one spectrum, use the middle color
+            colors_rgba = [cmap(0.5)]
+        else:
+            # Linear interpolation from 0 to 1
+            colors_rgba = [cmap(i / (n_spectra - 1)) for i in range(n_spectra)]
+        
+        # Convert RGBA to hex
+        colors_hex = []
+        for rgba in colors_rgba:
+            # Convert to hex
+            r = int(rgba[0] * 255)
+            g = int(rgba[1] * 255)
+            b = int(rgba[2] * 255)
+            hex_color = f'#{r:02x}{g:02x}{b:02x}'
+            colors_hex.append(hex_color)
+        
+        # Assign colors to spectra in order
+        for i, name in enumerate(ordered_spectra):
+            if name in spectra_data:
+                spectra_data[name]['color'] = colors_hex[i % len(colors_hex)]
+        
+        st.session_state.gradient_applied = True
+        
+    except Exception as e:
+        st.error(f"Error applying gradient colors: {e}")
+    
+    return spectra_data
+
 # Main app
 def main():
     # Custom header with logo
@@ -2667,9 +2714,52 @@ def main():
                             st.error("❌ Failed to prepare heatmap data. Check that all spectra are valid.")
                             st.session_state.heatmap_applied = False
                     
-                    # Color Assignment moved to the bottom
+                    # NEW: Gradient Color Assignment section
+                    st.markdown("---")
+                    st.markdown("### 🎨 Gradient Color Assignment")
+                    st.markdown("*Automatically assign colors to spectra using a gradient palette*")
+                    
+                    # Define gradient palettes (10 options)
+                    gradient_palettes = {
+                        'Blues': 'Blues (blue gradient)',
+                        'Reds': 'Reds (red gradient)',
+                        'Greens': 'Greens (green gradient)',
+                        'RdYlBu': 'Red-Yellow-Blue (diverging)',
+                        'Spectral': 'Spectral (rainbow)',
+                        'coolwarm': 'Cool-Warm (diverging)',
+                        'viridis': 'Viridis (perceptual)',
+                        'plasma': 'Plasma (perceptual)',
+                        'inferno': 'Inferno (perceptual)',
+                        'magma': 'Magma (perceptual)'
+                    }
+                    
+                    # Select gradient palette
+                    selected_gradient_palette = st.selectbox(
+                        "Select gradient palette",
+                        options=list(gradient_palettes.keys()),
+                        format_func=lambda x: gradient_palettes[x],
+                        index=3,  # Default to 'RdYlBu'
+                        key="gradient_palette_select"
+                    )
+                    st.session_state.gradient_palette = selected_gradient_palette
+                    
+                    # Apply gradient colors button
+                    if st.button("🎨 Apply gradient colors", use_container_width=True, key="apply_gradient_colors"):
+                        with st.spinner("Applying gradient colors..."):
+                            # Apply gradient colors to spectra
+                            spectra_data = apply_gradient_colors(
+                                ordered_spectra,
+                                selected_gradient_palette,
+                                spectra_data,
+                                []  # default_colors not needed here
+                            )
+                            st.success(f"✅ Gradient colors applied using {gradient_palettes[selected_gradient_palette]}!")
+                            st.rerun()
+                    
+                    # Color Assignment (existing section, moved to bottom as requested)
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
+                    st.markdown("*Manually adjust individual spectrum colors (after applying gradient if needed)*")
                     
                     # Define default color palette
                     default_colors = [
@@ -2684,16 +2774,18 @@ def main():
                         with col1:
                             st.markdown(f"**{name.replace('.txt', '')}**")
                         with col2:
-                            default_color = default_colors[i % len(default_colors)]
+                            # Use the current color from spectra_data if available, otherwise default
+                            current_color = spectra_data.get(name, {}).get('color', default_colors[i % len(default_colors)])
                             colors[name] = st.color_picker(
                                 f"Color {i+1}",
-                                value=default_color,
+                                value=current_color,
                                 key=f"color_{name}"
                             )
                     
-                    # Update spectra data with colors
+                    # Update spectra data with colors (manual assignments)
                     for name in ordered_spectra:
-                        spectra_data[name]['color'] = colors[name]
+                        if name in colors:
+                            spectra_data[name]['color'] = colors[name]
                     
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
@@ -2738,7 +2830,10 @@ def main():
                         'graph3d_z_label': st.session_state.graph3d_z_label,
                         'graph3d_azimuth': st.session_state.graph3d_azimuth,
                         'graph3d_elevation': st.session_state.graph3d_elevation,
-                        'graph3d_created': st.session_state.graph3d_created
+                        'graph3d_created': st.session_state.graph3d_created,
+                        # NEW: Gradient colors settings
+                        'gradient_palette': st.session_state.gradient_palette,
+                        'gradient_applied': st.session_state.gradient_applied
                     }
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -4083,6 +4178,8 @@ Correlation Analysis: {param_correlation}
 Spectral Markers: {len(st.session_state.spectral_markers)} markers
 3D Graphs Enabled: {st.session_state.get('enable_3d_graphs', False)}
 3D Graphs Created: {st.session_state.get('graph3d_created', False)}
+Gradient Colors Applied: {st.session_state.get('gradient_applied', False)}
+Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
 """
             st.download_button(
                 label="📄 Export Session Info",
@@ -4127,6 +4224,7 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
         - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
         - 🎛️ **Adjustable Transparency** - Control fill opacity from 0.2 to 0.9
         - ⚙️ **Grid & Line Thickness** - Customize plot appearance
+        - 🎨 **Gradient Color Assignment** - Automatically assign colors using gradient palettes
         """)
         
         st.markdown("### 📁 File Format:")
