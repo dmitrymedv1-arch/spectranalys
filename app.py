@@ -116,13 +116,11 @@ if 'graph3d_created' not in st.session_state:
 
 # NEW: Gradient colors session state variables
 if 'gradient_palette' not in st.session_state:
-    st.session_state.gradient_palette = 'coolwarm'
+    st.session_state.gradient_palette = 'RdYlBu'
 if 'gradient_applied' not in st.session_state:
     st.session_state.gradient_applied = False
 if 'gradient_colors_cache' not in st.session_state:
     st.session_state.gradient_colors_cache = {}  # Cache for gradient colors {name: hex_color}
-if 'manual_colors' not in st.session_state:
-    st.session_state.manual_colors = set()  # Track which colors were manually changed
 
 def load_instruction_html():
     """Load instruction HTML file and embed logo as base64"""
@@ -2723,17 +2721,19 @@ def main():
                     st.markdown("### 🎨 Gradient Color Assignment")
                     st.markdown("*Automatically assign colors to spectra using a gradient palette*")
                     
-                    # Define gradient palettes (10 options) - replaced with more sophisticated palettes
+                    # Define gradient palettes
                     gradient_palettes = {
-                        'coolwarm': 'Cool-Warm (diverging)',
+                        'Reds_r': 'Red gradient (reversed)',
                         'RdBu_r': 'Red-Blue (diverging, reversed)',
-                        'RdYlBu_r': 'Red-Yellow-Blue (diverging, reversed)',
-                        'PiYG': 'Pink-Yellow-Green (diverging)',
-                        'PRGn': 'Purple-Red-Green (diverging)',
-                        'BrBG': 'Brown-Blue-Green (diverging)',
-                        'Spectral_r': 'Spectral (rainbow, reversed)',
+                        'turbo': 'Turbo (improved jet)',
+                        'twilight_shifted': 'Twilight Shifted (blue-red-purple)',
+                        'Spectral': 'Spectral (rainbow)',
+                        'coolwarm': 'Cool-Warm (diverging)',
                         'viridis': 'Viridis (perceptual)',
                         'plasma': 'Plasma (perceptual)',
+                        'inferno': 'Inferno (perceptual)',
+                        'magma': 'Magma (perceptual)',
+                        'BrBG': 'Brown-Blue-Green (diverging)',
                         'twilight_shifted': 'Twilight Shifted (cyclic)'
                     }
                     
@@ -2742,7 +2742,7 @@ def main():
                         "Select gradient palette",
                         options=list(gradient_palettes.keys()),
                         format_func=lambda x: gradient_palettes[x],
-                        index=0,  # Default to 'coolwarm'
+                        index=3,  # Default to 'RdYlBu'
                         key="gradient_palette_select"
                     )
                     st.session_state.gradient_palette = selected_gradient_palette
@@ -2760,77 +2760,41 @@ def main():
                                 # Store gradient colors in session state
                                 st.session_state.gradient_colors_cache = gradient_colors
                                 st.session_state.gradient_applied = True
-                                st.session_state.gradient_palette = selected_gradient_palette
-                                st.session_state.manual_colors = set()  # Сбрасываем ручные изменения при новом градиенте
                                 
                                 # Apply gradient colors to spectra_data
                                 for name, hex_color in gradient_colors.items():
                                     if name in spectra_data:
                                         spectra_data[name]['color'] = hex_color
                                 
-                                # CRITICAL FIX: Update cached_spectra_data BEFORE rerun
+                                # Update cached data with new colors
                                 if st.session_state.cached_spectra_data is not None:
-                                    # Deep update of cached data
-                                    cached = st.session_state.cached_spectra_data
-                                    cached['spectra_data'] = spectra_data.copy()
-                                    cached['gradient_applied'] = True
-                                    cached['gradient_palette'] = selected_gradient_palette
-                                    cached['gradient_colors_cache'] = gradient_colors.copy()
-                                    # Force cache update
-                                    st.session_state.cached_spectra_data = cached
-                                else:
-                                    # If cached doesn't exist yet, create it
-                                    st.session_state.cached_spectra_data = {
-                                        'spectra_data': spectra_data.copy(),
-                                        'ordered_spectra': ordered_spectra,
-                                        'x_label': x_label,
-                                        'y_label': y_label,
-                                        'norm_method': norm_method,
-                                        'norm_range': norm_range,
-                                        'raw_offset_step': raw_offset_step,
-                                        'norm_offset_step': norm_offset_step,
-                                        'fill_area': fill_area,
-                                        'fill_alpha': fill_alpha,
-                                        'subtract_min_intensity': subtract_min_intensity,
-                                        'show_grid': show_grid,
-                                        'line_width': line_width,
-                                        'x_ranges': x_ranges,
-                                        'common_x_range': common_x_range,
-                                        'fig_width': fig_width,
-                                        'fig_height': fig_height,
-                                        'analyze_peaks_flag': analyze_peaks_flag,
-                                        'peak_width': peak_width if analyze_peaks_flag else 20,
-                                        'param_correlation': param_correlation,
-                                        'param_values': param_values if param_correlation else None,
-                                        'param_label': param_label if param_correlation else "Parameter",
-                                        'legend_fontsize': legend_fontsize,
-                                        'legend_position': legend_position,
-                                        'legend_offset': legend_offset,
-                                        'heatmap_params': st.session_state.heatmap_params,
-                                        'heatmap_param_type': st.session_state.heatmap_param_type,
-                                        'heatmap_interpolation': st.session_state.heatmap_interpolation,
-                                        'heatmap_colormap': st.session_state.heatmap_colormap,
-                                        'heatmap_y_label': st.session_state.heatmap_y_label,
-                                        'heatmap_applied': st.session_state.heatmap_applied,
-                                        'enable_3d_graphs': st.session_state.enable_3d_graphs,
-                                        'graph3d_params': st.session_state.graph3d_params,
-                                        'graph3d_x_label': st.session_state.graph3d_x_label,
-                                        'graph3d_y_label': st.session_state.graph3d_y_label,
-                                        'graph3d_z_label': st.session_state.graph3d_z_label,
-                                        'graph3d_azimuth': st.session_state.graph3d_azimuth,
-                                        'graph3d_elevation': st.session_state.graph3d_elevation,
-                                        'graph3d_created': st.session_state.graph3d_created,
-                                        'gradient_palette': selected_gradient_palette,
-                                        'gradient_applied': True,
-                                        'gradient_colors_cache': gradient_colors.copy()
-                                    }
+                                    st.session_state.cached_spectra_data['spectra_data'] = spectra_data
+                                    st.session_state.cached_spectra_data['gradient_applied'] = True
+                                    st.session_state.cached_spectra_data['gradient_palette'] = selected_gradient_palette
                                 
                                 st.success(f"✅ Gradient colors applied using {gradient_palettes[selected_gradient_palette]}!")
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to apply gradient colors. Please try again.")
+
+                    # Automatically assign default colors to spectra if not already assigned
+                    default_colors = [
+                        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+                    ]
                     
-                    # Color Assignment (existing section, moved to bottom as requested)
+                    # Assign default colors to any spectrum that doesn't have a color
+                    for i, name in enumerate(ordered_spectra):
+                        if name in spectra_data and spectra_data[name].get('color') is None:
+                            spectra_data[name]['color'] = default_colors[i % len(default_colors)]
+                    
+                    # Also check if gradient is applied and colors are in cache
+                    if st.session_state.gradient_applied and st.session_state.gradient_colors_cache:
+                        for name in ordered_spectra:
+                            if name in spectra_data and name in st.session_state.gradient_colors_cache:
+                                spectra_data[name]['color'] = st.session_state.gradient_colors_cache[name]
+                    
                     st.markdown("---")
                     st.markdown("### 🎨 Color Assignment")
                     st.markdown("*Manually adjust individual spectrum colors (after applying gradient if needed)*")
@@ -2842,14 +2806,6 @@ def main():
                         '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
                     ]
                     
-                    # CRITICAL FIX: Restore colors from session state if available
-                    # First, ensure spectra_data has colors from cache
-                    if st.session_state.gradient_applied and st.session_state.gradient_colors_cache:
-                        for name in ordered_spectra:
-                            if name in spectra_data and name in st.session_state.gradient_colors_cache:
-                                spectra_data[name]['color'] = st.session_state.gradient_colors_cache[name]
-                    
-                    # SECOND PASS: Display color pickers with current colors
                     colors = {}
                     for i, name in enumerate(ordered_spectra):
                         col1, col2 = st.columns([3, 1])
@@ -2857,8 +2813,8 @@ def main():
                             st.markdown(f"**{name.replace('.txt', '')}**")
                         with col2:
                             # Determine which color to use:
-                            # 1. If gradient is applied and color exists in cache, use it
-                            # 2. Otherwise use color from spectra_data
+                            # 1. If gradient is applied, use gradient color from cache
+                            # 2. Otherwise use current color from spectra_data
                             # 3. Fallback to default color
                             if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
                                 current_color = st.session_state.gradient_colors_cache[name]
@@ -2871,21 +2827,21 @@ def main():
                                 key=f"color_{name}"
                             )
                     
-                    # THIRD PASS: Update spectra data with colors (preserving manual changes)
+                    # Update spectra data with colors (manual assignments)
                     for name in ordered_spectra:
                         if name in colors:
-                            # Store the color in spectra_data
                             spectra_data[name]['color'] = colors[name]
-                            
-                            # Also update gradient cache if gradient is applied
-                            if st.session_state.gradient_applied and name in st.session_state.gradient_colors_cache:
+                            # If user manually changes a color, update the cache too
+                            if name in st.session_state.gradient_colors_cache:
                                 st.session_state.gradient_colors_cache[name] = colors[name]
-                    
-                    # CRITICAL FIX: Save updated colors back to cached_spectra_data
-                    if st.session_state.cached_spectra_data is not None:
-                        st.session_state.cached_spectra_data['spectra_data'] = spectra_data.copy()
-                        st.session_state.cached_spectra_data['gradient_colors_cache'] = st.session_state.gradient_colors_cache.copy()
-                    
+                        else:
+                            # Если цвет не был назначен, назначаем цвет по умолчанию
+                            default_color = default_colors[i % len(default_colors)]
+                            spectra_data[name]['color'] = default_color
+                            # Обновляем cached_spectra_data, если он существует
+                            if st.session_state.cached_spectra_data is not None:
+                                st.session_state.cached_spectra_data['spectra_data'] = spectra_data
+                                
                     # Store in session state for independent tabs
                     st.session_state.spectra_loaded = True
                     st.session_state.cached_spectra_data = {
