@@ -2,22 +2,40 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 from scipy.integrate import simpson
+from scipy.special import wofz
 from io import StringIO, BytesIO
 import re
 from datetime import datetime
 import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, gaussian_filter
+from scipy.signal import savgol_filter
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 import os
-import base64
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator
 import matplotlib.colors as mcolors
 from matplotlib.collections import PolyCollection
+
+try:
+    from lmfit import Parameters
+    from lmfit.models import VoigtModel
+    LMFIT_AVAILABLE = True
+except ImportError:
+    LMFIT_AVAILABLE = False
+
+try:
+    import pybaselines
+    from pybaselines import whittaker as pb_whittaker
+    from pybaselines import polynomial as pb_polynomial
+    PYBASELINES_AVAILABLE = True
+except ImportError:
+    PYBASELINES_AVAILABLE = False
 
 st.set_page_config(
     page_title="SpectrAnalys",
@@ -128,6 +146,74 @@ if 'peak_enabled' not in st.session_state:
     st.session_state.peak_enabled = False
 if 'correlation_enabled' not in st.session_state:
     st.session_state.correlation_enabled = False
+
+# Preprocessing global state
+if 'preproc_despike_enabled' not in st.session_state:
+    st.session_state.preproc_despike_enabled = False
+if 'preproc_despike_kernel' not in st.session_state:
+    st.session_state.preproc_despike_kernel = 3
+if 'preproc_despike_threshold' not in st.session_state:
+    st.session_state.preproc_despike_threshold = 8.0
+if 'preproc_denoise_enabled' not in st.session_state:
+    st.session_state.preproc_denoise_enabled = False
+if 'preproc_denoise_method' not in st.session_state:
+    st.session_state.preproc_denoise_method = 'Savitzky-Golay'
+if 'preproc_denoise_window' not in st.session_state:
+    st.session_state.preproc_denoise_window = 11
+if 'preproc_denoise_polyorder' not in st.session_state:
+    st.session_state.preproc_denoise_polyorder = 3
+if 'preproc_denoise_sigma' not in st.session_state:
+    st.session_state.preproc_denoise_sigma = 1.0
+if 'preproc_baseline_enabled' not in st.session_state:
+    st.session_state.preproc_baseline_enabled = False
+if 'preproc_baseline_method' not in st.session_state:
+    st.session_state.preproc_baseline_method = 'asPLS'
+if 'preproc_baseline_lam' not in st.session_state:
+    st.session_state.preproc_baseline_lam = 1e5
+if 'preproc_baseline_p' not in st.session_state:
+    st.session_state.preproc_baseline_p = 1e-2
+if 'preproc_baseline_diff_order' not in st.session_state:
+    st.session_state.preproc_baseline_diff_order = 2
+if 'preproc_baseline_max_iter' not in st.session_state:
+    st.session_state.preproc_baseline_max_iter = 50
+if 'preproc_baseline_tol' not in st.session_state:
+    st.session_state.preproc_baseline_tol = 1e-3
+if 'preproc_baseline_polyorder' not in st.session_state:
+    st.session_state.preproc_baseline_polyorder = 3
+if 'preproc_applied' not in st.session_state:
+    st.session_state.preproc_applied = False
+if 'preproc_cache_key' not in st.session_state:
+    st.session_state.preproc_cache_key = None
+if 'preproc_cached_spectra' not in st.session_state:
+    st.session_state.preproc_cached_spectra = None
+if 'preproc_version' not in st.session_state:
+    st.session_state.preproc_version = 0
+
+# Peak detection global parameters
+if 'peak_det_height_factor' not in st.session_state:
+    st.session_state.peak_det_height_factor = 0.05
+if 'peak_det_prominence_factor' not in st.session_state:
+    st.session_state.peak_det_prominence_factor = 0.03
+if 'peak_det_min_distance' not in st.session_state:
+    st.session_state.peak_det_min_distance = 5
+if 'peak_det_min_height_abs' not in st.session_state:
+    st.session_state.peak_det_min_height_abs = 2.0
+
+# Voigt fitting state
+if 'voigt_fit_triggered' not in st.session_state:
+    st.session_state.voigt_fit_triggered = False
+if 'voigt_fit_results' not in st.session_state:
+    st.session_state.voigt_fit_results = None
+if 'voigt_fit_components_df' not in st.session_state:
+    st.session_state.voigt_fit_components_df = None
+if 'voigt_fit_spectrum_name' not in st.session_state:
+    st.session_state.voigt_fit_spectrum_name = None
+if 'voigt_fit_x_range' not in st.session_state:
+    st.session_state.voigt_fit_x_range = (None, None)
+if 'voigt_use_normalized' not in st.session_state:
+    st.session_state.voigt_use_normalized = False
+if 'voigt_fit_log' not in st.session_state:
+    st.session_state.voigt_fit_log = None
 
 def load_instruction_html():
     try:
@@ -272,6 +358,157 @@ def load_spectrum(uploaded_file):
     except Exception as e:
         st.error(f"Error loading file {uploaded_file.name}: {e}")
         return None
+
+def _despike_whitaker_hayes(y, kernel_size=3, threshold=8.0):
+    import copy
+    spectrum = copy.deepcopy(np.asarray(y, dtype=float))
+    if len(spectrum) < 4:
+        return spectrum
+    mad = np.median(np.abs(spectrum - np.median(spectrum)))
+    if mad == 0:
+        return spectrum
+    mz = np.abs(0.6745 * (np.diff(spectrum) - np.median(np.diff(spectrum))) / (np.median(np.abs(np.diff(spectrum) - np.median(np.diff(spectrum)))) + 1e-12))
+    spikes = np.concatenate([[False], mz > threshold])
+    max_iter = 10
+    it = 0
+    while np.any(spikes) and it < max_iter:
+        changes = False
+        for i in range(len(spikes)):
+            if spikes[i]:
+                lo = max(0, i - kernel_size)
+                hi = min(len(spectrum), i + kernel_size + 1)
+                nb = np.arange(lo, hi)
+                good = nb[~spikes[nb]]
+                if len(good) == 0:
+                    continue
+                spectrum[i] = np.mean(spectrum[good])
+                spikes[i] = False
+                changes = True
+        if not changes:
+            break
+        it += 1
+    return spectrum
+
+def _denoise_savgol(y, window_length=11, polyorder=3):
+    y = np.asarray(y, dtype=float)
+    wl = int(window_length)
+    if wl % 2 == 0:
+        wl += 1
+    if wl <= polyorder:
+        wl = polyorder + 2 if (polyorder + 2) % 2 == 1 else polyorder + 3
+    if wl >= len(y):
+        wl = len(y) - 1 if (len(y) - 1) % 2 == 1 else len(y) - 2
+    if wl < 3:
+        return y
+    return savgol_filter(y, window_length=wl, polyorder=polyorder)
+
+def _denoise_gaussian(y, sigma=1.0):
+    return gaussian_filter(np.asarray(y, dtype=float), sigma=sigma)
+
+def _denoise_whittaker(y, lam=1e3, d=2):
+    y = np.asarray(y, dtype=float)
+    I = np.eye(len(y))
+    D = np.diff(I, d).T
+    return y @ np.linalg.inv(I + lam * D.T @ D).T
+
+def _baseline_fallback_poly(y, polyorder=3):
+    y = np.asarray(y, dtype=float)
+    x = np.arange(len(y))
+    try:
+        coef = np.polyfit(x, y, polyorder)
+        return np.polyval(coef, x)
+    except Exception:
+        return np.zeros_like(y)
+
+def _baseline_als_fallback(y, lam=1e5, p=1e-2, diff_order=2, max_iter=50, tol=1e-3):
+    y = np.asarray(y, dtype=float)
+    L = len(y)
+    if L < 3:
+        return np.zeros_like(y)
+    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
+    D = lam * D.dot(D.transpose())
+    w = np.ones(L)
+    z = np.zeros(L)
+    for _ in range(max_iter):
+        W = sparse.spdiags(w, 0, L, L)
+        Z = W + D
+        z_new = spsolve(Z, w * y)
+        if np.linalg.norm(z_new - z) / (np.linalg.norm(z_new) + 1e-12) < tol:
+            z = z_new
+            break
+        z = z_new
+        w = p * (y > z) + (1 - p) * (y < z)
+    return z
+
+def _apply_baseline_method(y, method, lam, p, diff_order, max_iter, tol, polyorder):
+    y = np.asarray(y, dtype=float)
+    if PYBASELINES_AVAILABLE:
+        try:
+            if method == 'asPLS':
+                baseline, _ = pybaselines.whittaker.aspls(y, lam=lam, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'airPLS':
+                baseline, _ = pybaselines.whittaker.airpls(y, lam=lam, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'arPLS':
+                baseline, _ = pybaselines.whittaker.arpls(y, lam=lam, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'iarPLS':
+                baseline, _ = pybaselines.whittaker.iarpls(y, lam=lam, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'drPLS':
+                baseline, _ = pybaselines.whittaker.drpls(y, lam=lam, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'IAsLS':
+                baseline, _ = pybaselines.whittaker.iasls(y, lam=lam, p=p, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'AsLS':
+                baseline, _ = pybaselines.whittaker.asls(y, lam=lam, p=p, diff_order=diff_order, max_iter=max_iter, tol=tol)
+                return baseline
+            elif method == 'ModPoly':
+                baseline, _ = pybaselines.polynomial.modpoly(y, poly_order=polyorder, tol=tol, max_iter=max_iter)
+                return baseline
+            elif method == 'IModPoly':
+                baseline, _ = pybaselines.polynomial.imodpoly(y, poly_order=polyorder, tol=tol, max_iter=max_iter)
+                return baseline
+            elif method == 'Poly':
+                baseline, _ = pybaselines.polynomial.poly(y, poly_order=polyorder)
+                return baseline
+        except Exception:
+            pass
+    if method == 'Poly':
+        return _baseline_fallback_poly(y, polyorder)
+    return _baseline_als_fallback(y, lam=lam, p=p, diff_order=diff_order, max_iter=max_iter, tol=tol)
+
+@st.cache_data
+def preprocess_spectra_cached(spectra_pickle_key, spectra_pickle, despike_enabled, despike_kernel, despike_threshold,
+                              denoise_enabled, denoise_method, denoise_window, denoise_polyorder, denoise_sigma,
+                              baseline_enabled, baseline_method, baseline_lam, baseline_p, baseline_diff_order,
+                              baseline_max_iter, baseline_tol, baseline_polyorder):
+    result = {}
+    for name, spec in spectra_pickle.items():
+        data = spec['data']
+        x = data['x'].values.copy()
+        y = data['y'].values.copy()
+        if despike_enabled:
+            y = _despike_whitaker_hayes(y, kernel_size=despike_kernel, threshold=despike_threshold)
+        if denoise_enabled:
+            if denoise_method == 'Savitzky-Golay':
+                y = _denoise_savgol(y, window_length=denoise_window, polyorder=denoise_polyorder)
+            elif denoise_method == 'Gaussian':
+                y = _denoise_gaussian(y, sigma=denoise_sigma)
+            elif denoise_method == 'Whittaker':
+                y = _denoise_whittaker(y, lam=1e3, d=2)
+        if baseline_enabled:
+            baseline = _apply_baseline_method(y, baseline_method, baseline_lam, baseline_p,
+                                              baseline_diff_order, baseline_max_iter, baseline_tol, baseline_polyorder)
+            y = y - baseline
+        result[name] = {
+            'data': pd.DataFrame({'x': x, 'y': y}),
+            'original_data': spec['data'],
+            'color': spec['color']
+        }
+    return result
 
 @st.cache_data
 def normalize_spectrum(x, y, norm_method, norm_range=None, x_ranges_for_rest=None):
@@ -692,8 +929,25 @@ def calculate_fwhm(x, y, peak_idx):
     fwhm = x_right - x_left
     return max(fwhm, 0)
 
+def voigt_height(amplitude, sigma, gamma):
+    return (amplitude / (sigma * np.sqrt(2 * np.pi))) * \
+           np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
+
+def voigt_amplitude_from_height(height, sigma, gamma):
+    return height * sigma * np.sqrt(2 * np.pi) / \
+        np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
+
+def _peak_detection_params():
+    return {
+        'height_factor': st.session_state.peak_det_height_factor,
+        'prominence_factor': st.session_state.peak_det_prominence_factor,
+        'min_distance': st.session_state.peak_det_min_distance,
+        'min_height_abs': st.session_state.peak_det_min_height_abs,
+    }
+
 @st.cache_data
-def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_data_pickle):
+def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_data_pickle,
+                                      height_factor, prominence_factor, min_distance):
     spectra_dict = spectra_data_pickle
     results = []
     for name, spec in spectra_dict.items():
@@ -709,7 +963,9 @@ def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_
             y = y_full
         if len(x) == 0:
             continue
-        peaks, properties = find_peaks(y, height=np.max(y)*0.05, prominence=np.max(y)*0.03, distance=5)
+        peaks, properties = find_peaks(y, height=np.max(y)*height_factor,
+                                       prominence=np.max(y)*prominence_factor,
+                                       distance=min_distance)
         for peak_idx in peaks:
             peak_x = x[peak_idx]
             peak_y = y[peak_idx]
@@ -727,7 +983,8 @@ def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_
             })
     return pd.DataFrame(results) if results else pd.DataFrame()
 
-def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
+def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20,
+                                height_factor=0.05, prominence_factor=0.03, min_distance=5):
     results = []
     for name, spec in spectra_dict.items():
         data = spec['data']
@@ -742,7 +999,9 @@ def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
             y = y_full
         if len(x) == 0:
             continue
-        peaks, properties = find_peaks(y, height=np.max(y)*0.05, prominence=np.max(y)*0.03, distance=5)
+        peaks, properties = find_peaks(y, height=np.max(y)*height_factor,
+                                       prominence=np.max(y)*prominence_factor,
+                                       distance=min_distance)
         for peak_idx in peaks:
             peak_x = x[peak_idx]
             peak_y = y[peak_idx]
@@ -1632,6 +1891,322 @@ def _spectra_dict_hash(spectra_dict):
     except Exception:
         return hash(str(len(spectra_dict)))
 
+def fit_voigt_decomposition(xs, ys, threshold, min_dist, min_height, max_iterations,
+                             center_vary, fit_method='leastsq', reduce_factor=None,
+                             progress_callback=None):
+    if not LMFIT_AVAILABLE:
+        return None, "lmfit library is not available. Please install: pip install lmfit"
+    if len(xs) < 10:
+        return None, "Not enough data points for fitting."
+    if reduce_factor and reduce_factor > 1:
+        xs_fit = xs[::reduce_factor]
+        ys_fit = ys[::reduce_factor]
+    else:
+        xs_fit = xs
+        ys_fit = ys
+    peak_indices, properties = find_peaks(ys_fit, height=threshold, distance=min_dist)
+    num_peaks = len(peak_indices)
+    if num_peaks == 0:
+        return None, "No peaks detected with the given threshold."
+    peak_positions = xs_fit[peak_indices]
+    peak_heights = ys_fit[peak_indices]
+    results_half = peak_widths(ys_fit, peak_indices, rel_height=0.5)
+    width_in_samples = results_half[0]
+    dx = np.diff(xs_fit).mean() if len(xs_fit) > 1 else 1.0
+    fwhms = width_in_samples * dx
+    sigmas = fwhms / (2 * np.sqrt(2 * np.log(2)))
+    gammas = fwhms / 2
+    model = None
+    params = Parameters()
+    min_sigma = 1e-6
+    min_gamma = 1e-6
+    x_span = xs_fit.max() - xs_fit.min()
+    max_amplitude = ys_fit.max() * np.pi * x_span / 2
+    max_sigma = x_span / 10
+    max_gamma = x_span / 10
+    for i in range(num_peaks):
+        prefix = f'p{i}_'
+        voigt = VoigtModel(prefix=prefix)
+        pars = voigt.make_params()
+        pos = peak_positions[i]
+        height = peak_heights[i]
+        sigma_guess = sigmas[i] if len(sigmas) > i and np.isfinite(sigmas[i]) and sigmas[i] > 0 else x_span / 50
+        gamma_guess = gammas[i] if len(gammas) > i and np.isfinite(gammas[i]) and gammas[i] > 0 else x_span / 50
+        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
+        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
+        try:
+            amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
+        except Exception:
+            amplitude_guess = height * 10
+        if not np.isfinite(amplitude_guess):
+            amplitude_guess = height * 10
+        amplitude_guess = np.clip(amplitude_guess, None, max_amplitude)
+        try:
+            min_amplitude = voigt_amplitude_from_height(min_height, sigma_guess, gamma_guess)
+        except Exception:
+            min_amplitude = 0
+        if not np.isfinite(min_amplitude):
+            min_amplitude = 0
+        pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude, max=max_amplitude, vary=True)
+        pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+        pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma, max=max_sigma, vary=True)
+        pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma, max=max_gamma, vary=True)
+        if model is None:
+            model = voigt
+        else:
+            model += voigt
+        params.update(pars)
+    try:
+        final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+    except Exception as e:
+        return None, f"Initial fitting failed: {e}"
+    params = final_result.params.copy()
+    negligible_peaks = []
+    for param_name in final_result.params:
+        if 'amplitude' in param_name:
+            prefix = param_name.split('amplitude')[0]
+            amplitude = final_result.params[prefix + 'amplitude'].value
+            sigma = final_result.params[prefix + 'sigma'].value
+            gamma = final_result.params[prefix + 'gamma'].value
+            try:
+                h = voigt_height(amplitude, sigma, gamma)
+            except Exception:
+                h = 0
+            if not np.isfinite(h) or h < min_height * 1.1:
+                negligible_peaks.append(prefix)
+    if negligible_peaks:
+        for prefix in negligible_peaks:
+            for par in list(params.keys()):
+                if par.startswith(prefix):
+                    del params[par]
+        model = None
+        prefixes_added = set()
+        for param_name in params:
+            parts = param_name.split('_')
+            if len(parts) < 2:
+                continue
+            prefix = '_'.join(parts[:-1]) + '_'
+            if prefix not in prefixes_added:
+                voigt = VoigtModel(prefix=prefix)
+                if model is None:
+                    model = voigt
+                else:
+                    model += voigt
+                prefixes_added.add(prefix)
+        if model is not None:
+            try:
+                final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+                params = final_result.params.copy()
+            except Exception:
+                pass
+    iteration = 0
+    log_lines = []
+    log_lines.append(f"Initial fit: {num_peaks} peaks, {len(negligible_peaks)} removed")
+    while iteration < max_iterations:
+        try:
+            residuals = ys_fit - final_result.best_fit
+        except Exception:
+            break
+        residual_peak_indices, _ = find_peaks(residuals, height=threshold, distance=min_dist)
+        if len(residual_peak_indices) == 0:
+            log_lines.append(f"Iter {iteration+1}: no residual peaks, stop.")
+            break
+        residual_widths, _, _, _ = peak_widths(residuals, residual_peak_indices, rel_height=0.5)
+        residual_fwhms = residual_widths * dx
+        model_new = None
+        params_new = Parameters()
+        for idx, fwhm in zip(residual_peak_indices, residual_fwhms):
+            pos = xs_fit[idx]
+            height = residuals[idx]
+            if height < min_height:
+                continue
+            sigma_guess = fwhm / (2 * np.sqrt(2 * np.log(2))) if fwhm > 0 else x_span / 50
+            gamma_guess = fwhm / 2 if fwhm > 0 else x_span / 50
+            sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
+            gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
+            try:
+                amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
+            except Exception:
+                continue
+            if not np.isfinite(amplitude_guess) or amplitude_guess <= 0:
+                continue
+            amplitude_guess = np.clip(amplitude_guess, None, max_amplitude)
+            try:
+                min_amplitude = voigt_amplitude_from_height(min_height, sigma_guess, gamma_guess)
+            except Exception:
+                min_amplitude = 0
+            prefix = f'iter{iteration+1}_p{idx}_'
+            voigt = VoigtModel(prefix=prefix)
+            pars = voigt.make_params()
+            pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude, max=max_amplitude, vary=True)
+            pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma, max=max_sigma, vary=True)
+            pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma, max=max_gamma, vary=True)
+            if model_new is None:
+                model_new = voigt
+            else:
+                model_new += voigt
+            params_new.update(pars)
+        if model_new is None:
+            log_lines.append(f"Iter {iteration+1}: no valid residual peaks, stop.")
+            break
+        model += model_new
+        params.update(params_new)
+        params.update(final_result.params)
+        try:
+            final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+            params = final_result.params.copy()
+        except Exception as e:
+            log_lines.append(f"Iter {iteration+1}: fitting failed: {e}")
+            break
+        negligible_peaks = []
+        for param_name in final_result.params:
+            if 'amplitude' in param_name:
+                prefix = param_name.split('amplitude')[0]
+                amplitude = final_result.params[prefix + 'amplitude'].value
+                sigma = final_result.params[prefix + 'sigma'].value
+                gamma = final_result.params[prefix + 'gamma'].value
+                try:
+                    h = voigt_height(amplitude, sigma, gamma)
+                except Exception:
+                    h = 0
+                if not np.isfinite(h) or h < min_height * 1.1:
+                    negligible_peaks.append(prefix)
+        if negligible_peaks:
+            for prefix in negligible_peaks:
+                for par in list(params.keys()):
+                    if par.startswith(prefix):
+                        del params[par]
+            model = None
+            prefixes_added = set()
+            for param_name in params:
+                parts = param_name.split('_')
+                if len(parts) < 2:
+                    continue
+                prefix = '_'.join(parts[:-1]) + '_'
+                if prefix not in prefixes_added:
+                    voigt = VoigtModel(prefix=prefix)
+                    if model is None:
+                        model = voigt
+                    else:
+                        model += voigt
+                    prefixes_added.add(prefix)
+            if model is not None:
+                params.update(final_result.params)
+                try:
+                    final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+                    params = final_result.params.copy()
+                except Exception:
+                    pass
+        log_lines.append(f"Iter {iteration+1}: added {len(params_new)} residual peaks, removed {len(negligible_peaks)} negligible.")
+        if progress_callback is not None:
+            try:
+                progress_callback(iteration + 1, max_iterations, log_lines[-1])
+            except Exception:
+                pass
+        iteration += 1
+    components = []
+    seen_prefixes = set()
+    for param_name in final_result.params:
+        if 'amplitude' in param_name:
+            prefix = param_name.split('amplitude')[0]
+            if prefix in seen_prefixes:
+                continue
+            seen_prefixes.add(prefix)
+            try:
+                amplitude = final_result.params[prefix + 'amplitude'].value
+                center = final_result.params[prefix + 'center'].value
+                sigma = final_result.params[prefix + 'sigma'].value
+                gamma = final_result.params[prefix + 'gamma'].value
+                amplitude_err = final_result.params[prefix + 'amplitude'].stderr
+                center_err = final_result.params[prefix + 'center'].stderr
+                sigma_err = final_result.params[prefix + 'sigma'].stderr
+                gamma_err = final_result.params[prefix + 'gamma'].stderr
+            except Exception:
+                continue
+            try:
+                height = voigt_height(amplitude, sigma, gamma)
+            except Exception:
+                height = 0
+            fwhm_gauss = 2 * np.sqrt(2 * np.log(2)) * sigma
+            fwhm_lorentz = 2 * gamma
+            fwhm_voigt = 0.5346 * fwhm_lorentz + np.sqrt(0.2166 * fwhm_lorentz ** 2 + fwhm_gauss ** 2)
+            area = amplitude
+            eta = fwhm_lorentz / (fwhm_lorentz + fwhm_gauss) if (fwhm_lorentz + fwhm_gauss) > 0 else 0
+            components.append({
+                'Component': prefix.rstrip('_'),
+                'Center (cm⁻¹)': center,
+                'Height': height,
+                'Amplitude': amplitude,
+                'Sigma (cm⁻¹)': sigma,
+                'Gamma (cm⁻¹)': gamma,
+                'FWHM (cm⁻¹)': fwhm_voigt,
+                'Area': area,
+                'Lorentz fraction': eta,
+                'Center err': center_err if center_err is not None else np.nan,
+                'Height err': amplitude_err if amplitude_err is not None else np.nan,
+                'FWHM err': sigma_err if sigma_err is not None else np.nan,
+            })
+    components_df = pd.DataFrame(components)
+    if not components_df.empty:
+        components_df = components_df.sort_values('Center (cm⁻¹)').reset_index(drop=True)
+    fit_info = {
+        'n_components': len(components_df),
+        'reduced_chi_square': final_result.redchi if hasattr(final_result, 'redchi') else None,
+        'aic': final_result.aic if hasattr(final_result, 'aic') else None,
+        'bic': final_result.bic if hasattr(final_result, 'bic') else None,
+        'nfev': final_result.nfev if hasattr(final_result, 'nfev') else None,
+        'success': final_result.success if hasattr(final_result, 'success') else None,
+        'message': final_result.message if hasattr(final_result, 'message') else '',
+        'log': log_lines,
+        'xs': xs_fit,
+        'ys': ys_fit,
+        'best_fit': final_result.best_fit,
+        'best_fit_full': final_result,
+    }
+    return (final_result, components_df, fit_info), None
+
+def plot_voigt_fit(xs, ys, best_fit_result, components_df, title, x_label, y_label,
+                   show_components=True, show_residuals=True, show_grid=True,
+                   fig_width=14, fig_height=9):
+    if show_residuals:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(fig_width, fig_height),
+                                       gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    else:
+        fig, ax1 = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+        ax2 = None
+    ax1.plot(xs, ys, lw=1.2, label='Data', color='black', alpha=0.85)
+    ax1.plot(xs, best_fit_result.best_fit, label='Voigt fit', color='red', lw=2, ls='--')
+    if show_components:
+        try:
+            comps = best_fit_result.eval_components(x=xs)
+            cmap = plt.get_cmap('tab20')
+            i = 0
+            for key, comp_y in comps.items():
+                color = cmap(i % 20)
+                ax1.plot(xs, comp_y, ls='-', alpha=0.7, lw=1.0, color=color, label=f'  {key.rstrip("_")}')
+                i += 1
+        except Exception:
+            pass
+    ax1.set_ylabel(y_label, fontsize=11, fontweight='bold')
+    ax1.set_title(title, fontsize=12, fontweight='bold')
+    ax1.legend(loc='best', fontsize=8, frameon=True, edgecolor='black', prop={'weight': 'bold'}, ncol=2)
+    ax1.tick_params(direction='in', length=5, width=1)
+    if show_grid:
+        ax1.grid(True, alpha=0.3, linestyle='--')
+    if ax2 is not None:
+        residuals = ys - best_fit_result.best_fit
+        ax2.plot(xs, residuals, color='blue', lw=1.0, label='Residuals')
+        ax2.axhline(0, color='black', linestyle='--', lw=0.8)
+        ax2.set_xlabel(x_label, fontsize=11, fontweight='bold')
+        ax2.set_ylabel('Residuals', fontsize=11, fontweight='bold')
+        ax2.tick_params(direction='in', length=5, width=1)
+        if show_grid:
+            ax2.grid(True, alpha=0.3, linestyle='--')
+        ax2.legend(loc='best', fontsize=9)
+    plt.tight_layout()
+    return fig
+
 @st.fragment
 def render_combined_tab(cached, filtered_spectra, x_ranges):
     st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -1747,6 +2322,8 @@ def render_peak_tab(cached, filtered_spectra):
 
     st.markdown("#### 📊 Select Analysis Range")
     st.markdown("Use the sliders below to select left and right boundaries for peak analysis")
+    st.caption(f"Peak detection parameters (from sidebar): height={st.session_state.peak_det_height_factor:.3f}×max, "
+               f"prominence={st.session_state.peak_det_prominence_factor:.3f}×max, distance={st.session_state.peak_det_min_distance}")
 
     all_x = []
     for spec in filtered_spectra.values():
@@ -1801,7 +2378,12 @@ def render_peak_tab(cached, filtered_spectra):
     if st.button("🚀 Analyze", key="run_peak_analysis"):
         if left_boundary < right_boundary:
             with st.spinner("Analyzing peaks..."):
-                peaks_df = analyze_peaks_manual_range(filtered_spectra, manual_range, peak_width)
+                peaks_df = analyze_peaks_manual_range(
+                    filtered_spectra, manual_range, peak_width,
+                    height_factor=st.session_state.peak_det_height_factor,
+                    prominence_factor=st.session_state.peak_det_prominence_factor,
+                    min_distance=st.session_state.peak_det_min_distance,
+                )
                 st.session_state.peak_analysis_results = peaks_df
                 st.session_state.peak_analysis_triggered = True
                 st.session_state.peak_analysis_x_range = manual_range
@@ -2940,6 +3522,276 @@ def render_heatmap_tab(cached, filtered_spectra, ordered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+@st.fragment
+def render_voigt_tab(cached, filtered_spectra, ordered_spectra):
+    st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+    st.subheader("🧬 Spectral Decomposition (Voigt Fitting)")
+    st.markdown("*Decompose complex spectra into individual Voigt components with iterative residual analysis*")
+
+    if not LMFIT_AVAILABLE:
+        st.error("❌ `lmfit` library is not installed. Please run: `pip install lmfit`")
+        st.info("Voigt fitting requires lmfit for nonlinear least-squares optimization.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    if not filtered_spectra:
+        st.warning("⚠️ No spectra loaded. Please load spectra in the sidebar first.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    x_label = cached['x_label']
+    y_label = cached['y_label']
+
+    st.markdown("#### 📊 Select Spectrum for Fitting")
+    spectrum_to_fit = st.selectbox(
+        "Choose a spectrum:",
+        options=ordered_spectra,
+        index=0,
+        key="voigt_spectrum_select"
+    )
+    st.session_state.voigt_fit_spectrum_name = spectrum_to_fit
+
+    st.markdown("#### 📐 Fitting Range")
+    st.markdown("*Uses the range from Peak Analysis if available, or select manually*")
+
+    spec_data = filtered_spectra[spectrum_to_fit]['data']
+    all_x = spec_data['x'].values
+    global_min_x = float(np.min(all_x))
+    global_max_x = float(np.max(all_x))
+
+    inherited_range = st.session_state.peak_analysis_x_range
+    inherited_active = (
+        inherited_range is not None
+        and inherited_range[0] is not None
+        and inherited_range[1] is not None
+        and inherited_range[0] < inherited_range[1]
+    )
+
+    use_inherited = st.checkbox(
+        "Use range from Peak Analysis",
+        value=inherited_active,
+        key="voigt_use_inherited_range",
+        disabled=not inherited_active
+    )
+
+    if inherited_active and use_inherited:
+        left_boundary = inherited_range[0]
+        right_boundary = inherited_range[1]
+        st.info(f"📌 Using inherited range: {left_boundary:.1f} – {right_boundary:.1f} cm⁻¹")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            left_boundary = st.slider(
+                "Left boundary (cm⁻¹)",
+                min_value=global_min_x, max_value=global_max_x,
+                value=global_min_x,
+                step=(global_max_x - global_min_x) / 200,
+                key="voigt_left_boundary"
+            )
+        with col2:
+            right_boundary = st.slider(
+                "Right boundary (cm⁻¹)",
+                min_value=global_min_x, max_value=global_max_x,
+                value=global_max_x,
+                step=(global_max_x - global_min_x) / 200,
+                key="voigt_right_boundary"
+            )
+
+    if left_boundary >= right_boundary:
+        st.warning("⚠️ Left boundary must be less than right boundary")
+        fit_range = (None, None)
+    else:
+        fit_range = (left_boundary, right_boundary)
+
+    st.session_state.voigt_fit_x_range = fit_range
+
+    use_normalized = st.checkbox(
+        "Use normalized data for fitting",
+        value=st.session_state.voigt_use_normalized,
+        key="voigt_use_norm_checkbox",
+        help="Normalization changes physical meaning of amplitudes. Keep off for physical quantities."
+    )
+    st.session_state.voigt_use_normalized = use_normalized
+
+    st.markdown("---")
+    st.markdown("#### ⚙️ Fitting Parameters")
+    st.caption(f"Peak detection inherited from sidebar: height={st.session_state.peak_det_height_factor:.3f}×max, "
+               f"prominence={st.session_state.peak_det_prominence_factor:.3f}×max, distance={st.session_state.peak_det_min_distance}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        voigt_threshold = st.number_input(
+            "Peak detection threshold (absolute)",
+            min_value=0.0, value=float(np.max(spec_data['y'].values) * st.session_state.peak_det_height_factor),
+            step=0.01, format="%.4f", key="voigt_threshold",
+            help="Minimum height for peaks in data and residuals"
+        )
+        voigt_min_dist = st.number_input(
+            "Minimum distance between peaks (points)",
+            min_value=1, value=int(st.session_state.peak_det_min_distance),
+            step=1, key="voigt_min_dist"
+        )
+        voigt_min_height = st.number_input(
+            "Minimum peak height for keeping component",
+            min_value=0.0, value=float(st.session_state.peak_det_min_height_abs),
+            step=0.01, format="%.4f", key="voigt_min_height",
+            help="Components with height below this value are removed"
+        )
+    with col2:
+        voigt_max_iter = st.number_input(
+            "Maximum iterations",
+            min_value=0, max_value=20, value=5, step=1, key="voigt_max_iter",
+            help="Number of residual-analysis iterations to add new components"
+        )
+        voigt_center_vary = st.number_input(
+            "Center variation (± cm⁻¹)",
+            min_value=0.1, value=5.0, step=0.5, format="%.2f", key="voigt_center_vary"
+        )
+        voigt_reduce = st.number_input(
+            "Reduce data points factor",
+            min_value=1, max_value=50, value=1, step=1, key="voigt_reduce",
+            help="Use every N-th point to speed up fitting. 1 = use all points"
+        )
+
+    voigt_fit_method = st.selectbox(
+        "Optimization method",
+        options=["leastsq", "least_squares", "nelder", "lbfgsb"],
+        index=0, key="voigt_fit_method"
+    )
+
+    st.markdown("---")
+
+    if st.button("🚀 Run Voigt Decomposition", use_container_width=True, key="run_voigt_fit"):
+        if fit_range[0] is None or fit_range[1] is None:
+            st.error("Please select a valid range (left < right)")
+        else:
+            spec_data_local = filtered_spectra[spectrum_to_fit]['data']
+            x_full = spec_data_local['x'].values
+            y_full = spec_data_local['y'].values
+            if use_normalized:
+                y_full = normalize_spectrum(x_full, y_full, cached['norm_method'], cached['norm_range'], cached['x_ranges'])
+            mask = (x_full >= fit_range[0]) & (x_full <= fit_range[1])
+            x_fit = x_full[mask]
+            y_fit = y_full[mask]
+            if len(x_fit) < 10:
+                st.error("Not enough data points in selected range.")
+            else:
+                progress_bar = st.progress(0.0)
+                status_text = st.empty()
+
+                def _progress_cb(iter_num, max_iter, msg):
+                    try:
+                        progress_bar.progress(min(1.0, iter_num / max(1, max_iter)))
+                        status_text.info(f"Iteration {iter_num}/{max_iter}: {msg}")
+                    except Exception:
+                        pass
+
+                with st.spinner("Running Voigt decomposition (may take a while)..."):
+                    result, error = fit_voigt_decomposition(
+                        x_fit, y_fit,
+                        threshold=voigt_threshold,
+                        min_dist=int(voigt_min_dist),
+                        min_height=voigt_min_height,
+                        max_iterations=int(voigt_max_iter),
+                        center_vary=voigt_center_vary,
+                        fit_method=voigt_fit_method,
+                        reduce_factor=int(voigt_reduce) if voigt_reduce > 1 else None,
+                        progress_callback=_progress_cb
+                    )
+                progress_bar.empty()
+                status_text.empty()
+                if error:
+                    st.error(f"❌ Fitting failed: {error}")
+                    st.session_state.voigt_fit_triggered = False
+                    st.session_state.voigt_fit_results = None
+                else:
+                    best_result, components_df, fit_info = result
+                    st.session_state.voigt_fit_triggered = True
+                    st.session_state.voigt_fit_results = fit_info
+                    st.session_state.voigt_fit_components_df = components_df
+                    st.session_state.voigt_fit_log = fit_info.get('log', [])
+                    st.success(f"✅ Voigt decomposition completed! {fit_info['n_components']} components fitted.")
+
+    if st.session_state.get('voigt_fit_triggered', False) and st.session_state.get('voigt_fit_results') is not None:
+        fit_info = st.session_state.voigt_fit_results
+        components_df = st.session_state.voigt_fit_components_df
+
+        st.markdown("---")
+        st.markdown("#### 📊 Fit Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Components", fit_info['n_components'])
+        with col2:
+            rchi = fit_info.get('reduced_chi_square')
+            st.metric("Reduced χ²", f"{rchi:.4e}" if rchi is not None else "N/A")
+        with col3:
+            aic = fit_info.get('aic')
+            st.metric("AIC", f"{aic:.2f}" if aic is not None else "N/A")
+        with col4:
+            bic = fit_info.get('bic')
+            st.metric("BIC", f"{bic:.2f}" if bic is not None else "N/A")
+
+        with st.expander("📋 Fit log (iterations)", expanded=False):
+            for line in st.session_state.get('voigt_fit_log', []):
+                st.text(line)
+
+        st.markdown("---")
+        st.markdown("#### 📈 Voigt Fit Visualization")
+        show_components = st.checkbox("Show components", value=True, key="voigt_show_components")
+        show_residuals = st.checkbox("Show residuals panel", value=True, key="voigt_show_residuals")
+
+        fig_voigt = plot_voigt_fit(
+            fit_info['xs'], fit_info['ys'], fit_info['best_fit_full'],
+            components_df,
+            title=f"Voigt Decomposition: {spectrum_to_fit.replace('.txt', '')}",
+            x_label=x_label, y_label=y_label,
+            show_components=show_components, show_residuals=show_residuals,
+            show_grid=cached['show_grid'],
+            fig_width=cached['fig_width'] + 4,
+            fig_height=cached['fig_height'] + 3
+        )
+        st.pyplot(fig_voigt)
+        buf = BytesIO()
+        fig_voigt.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+        buf.seek(0)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        st.markdown(f"""
+        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+            <a href="data:image/png;base64,{b64}" download="voigt_decomposition_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                               color: white; border: none; border-radius: 8px; 
+                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                    📥 Download Voigt Fit (PNG, 600 dpi)
+                </button>
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+        plt.close(fig_voigt)
+
+        st.markdown("---")
+        st.markdown("#### 📋 Component Parameters Table")
+        st.markdown("*Each row corresponds to one Voigt component. Error columns show 1σ standard errors from the fit.*")
+        if components_df is not None and not components_df.empty:
+            st.dataframe(components_df, use_container_width=True, hide_index=True)
+            csv_components = components_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Components (CSV)",
+                data=csv_components,
+                file_name=f"voigt_components_{spectrum_to_fit.replace('.txt','')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="voigt_components_download"
+            )
+        else:
+            st.info("No components in the final fit.")
+
+        with st.expander("📄 Full lmfit report", expanded=False):
+            try:
+                st.text(fit_info['best_fit_full'].fit_report())
+            except Exception as e:
+                st.warning(f"Could not generate full report: {e}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main():
     import os
     from PIL import Image
@@ -3046,6 +3898,208 @@ def main():
                     st.markdown("### ⚙️ Processing Options")
 
                     common_x_range = st.checkbox("Align all spectra to common x range", value=False)
+
+                    with st.expander("🧹 Preprocessing (Despike / Denoise / Baseline)", expanded=False):
+                        st.markdown("*Applied to all spectra before normalization. Order: Despike → Denoise → Baseline.*")
+                        preproc_despike_enabled = st.checkbox(
+                            "Enable despiking (Whitaker-Hayes)",
+                            value=st.session_state.preproc_despike_enabled,
+                            key="preproc_despike_enabled_cb"
+                        )
+                        st.session_state.preproc_despike_enabled = preproc_despike_enabled
+                        if preproc_despike_enabled:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                preproc_despike_kernel = st.number_input(
+                                    "Kernel size", min_value=1, max_value=20,
+                                    value=st.session_state.preproc_despike_kernel, step=1,
+                                    key="preproc_despike_kernel_inp"
+                                )
+                                st.session_state.preproc_despike_kernel = int(preproc_despike_kernel)
+                            with col2:
+                                preproc_despike_threshold = st.number_input(
+                                    "Z-score threshold", min_value=1.0, max_value=50.0,
+                                    value=float(st.session_state.preproc_despike_threshold),
+                                    step=0.5, format="%.1f", key="preproc_despike_threshold_inp"
+                                )
+                                st.session_state.preproc_despike_threshold = float(preproc_despike_threshold)
+
+                        preproc_denoise_enabled = st.checkbox(
+                            "Enable denoising",
+                            value=st.session_state.preproc_denoise_enabled,
+                            key="preproc_denoise_enabled_cb"
+                        )
+                        st.session_state.preproc_denoise_enabled = preproc_denoise_enabled
+                        if preproc_denoise_enabled:
+                            preproc_denoise_method = st.selectbox(
+                                "Denoising method",
+                                options=["Savitzky-Golay", "Gaussian", "Whittaker"],
+                                index=["Savitzky-Golay", "Gaussian", "Whittaker"].index(st.session_state.preproc_denoise_method)
+                                if st.session_state.preproc_denoise_method in ["Savitzky-Golay", "Gaussian", "Whittaker"] else 0,
+                                key="preproc_denoise_method_sel"
+                            )
+                            st.session_state.preproc_denoise_method = preproc_denoise_method
+                            if preproc_denoise_method == "Savitzky-Golay":
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    preproc_denoise_window = st.number_input(
+                                        "Window length (odd)", min_value=3, max_value=101,
+                                        value=int(st.session_state.preproc_denoise_window), step=2,
+                                        key="preproc_denoise_window_inp"
+                                    )
+                                    st.session_state.preproc_denoise_window = int(preproc_denoise_window)
+                                with col2:
+                                    preproc_denoise_polyorder = st.number_input(
+                                        "Polynomial order", min_value=1, max_value=10,
+                                        value=int(st.session_state.preproc_denoise_polyorder), step=1,
+                                        key="preproc_denoise_polyorder_inp"
+                                    )
+                                    st.session_state.preproc_denoise_polyorder = int(preproc_denoise_polyorder)
+                            elif preproc_denoise_method == "Gaussian":
+                                preproc_denoise_sigma = st.number_input(
+                                    "Gaussian sigma", min_value=0.1, max_value=20.0,
+                                    value=float(st.session_state.preproc_denoise_sigma),
+                                    step=0.1, format="%.1f", key="preproc_denoise_sigma_inp"
+                                )
+                                st.session_state.preproc_denoise_sigma = float(preproc_denoise_sigma)
+
+                        preproc_baseline_enabled = st.checkbox(
+                            "Enable baseline correction",
+                            value=st.session_state.preproc_baseline_enabled,
+                            key="preproc_baseline_enabled_cb"
+                        )
+                        st.session_state.preproc_baseline_enabled = preproc_baseline_enabled
+                        if preproc_baseline_enabled:
+                            if not PYBASELINES_AVAILABLE:
+                                st.caption("⚠️ `pybaselines` not installed — fallback algorithms will be used. Install: `pip install pybaselines`")
+                            baseline_methods = ['asPLS', 'airPLS', 'arPLS', 'iarPLS', 'drPLS', 'IAsLS', 'AsLS',
+                                                'ModPoly', 'IModPoly', 'Poly']
+                            preproc_baseline_method = st.selectbox(
+                                "Baseline method",
+                                options=baseline_methods,
+                                index=baseline_methods.index(st.session_state.preproc_baseline_method)
+                                if st.session_state.preproc_baseline_method in baseline_methods else 0,
+                                key="preproc_baseline_method_sel"
+                            )
+                            st.session_state.preproc_baseline_method = preproc_baseline_method
+                            if preproc_baseline_method in ['Poly', 'ModPoly', 'IModPoly']:
+                                preproc_baseline_polyorder = st.number_input(
+                                    "Polynomial order", min_value=1, max_value=10,
+                                    value=int(st.session_state.preproc_baseline_polyorder), step=1,
+                                    key="preproc_baseline_polyorder_inp"
+                                )
+                                st.session_state.preproc_baseline_polyorder = int(preproc_baseline_polyorder)
+                            if preproc_baseline_method not in ['Poly']:
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    preproc_baseline_lam = st.number_input(
+                                        "Smoothness λ", min_value=1.0, max_value=1e12,
+                                        value=float(st.session_state.preproc_baseline_lam),
+                                        step=1e4, format="%.2e", key="preproc_baseline_lam_inp"
+                                    )
+                                    st.session_state.preproc_baseline_lam = float(preproc_baseline_lam)
+                                with col2:
+                                    preproc_baseline_diff_order = st.number_input(
+                                        "Difference order", min_value=1, max_value=5,
+                                        value=int(st.session_state.preproc_baseline_diff_order), step=1,
+                                        key="preproc_baseline_diff_order_inp"
+                                    )
+                                    st.session_state.preproc_baseline_diff_order = int(preproc_baseline_diff_order)
+                                if preproc_baseline_method in ['AsLS', 'IAsLS']:
+                                    preproc_baseline_p = st.number_input(
+                                        "Asymmetry p", min_value=1e-6, max_value=0.5,
+                                        value=float(st.session_state.preproc_baseline_p),
+                                        step=1e-3, format="%.4f", key="preproc_baseline_p_inp"
+                                    )
+                                    st.session_state.preproc_baseline_p = float(preproc_baseline_p)
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    preproc_baseline_max_iter = st.number_input(
+                                        "Max iterations", min_value=1, max_value=500,
+                                        value=int(st.session_state.preproc_baseline_max_iter), step=1,
+                                        key="preproc_baseline_max_iter_inp"
+                                    )
+                                    st.session_state.preproc_baseline_max_iter = int(preproc_baseline_max_iter)
+                                with col2:
+                                    preproc_baseline_tol = st.number_input(
+                                        "Tolerance", min_value=1e-10, max_value=1.0,
+                                        value=float(st.session_state.preproc_baseline_tol),
+                                        step=1e-4, format="%.4e", key="preproc_baseline_tol_inp"
+                                    )
+                                    st.session_state.preproc_baseline_tol = float(preproc_baseline_tol)
+
+                        if st.button("🧹 Apply Preprocessing", use_container_width=True, key="apply_preprocessing_btn"):
+                            spectra_for_preproc = {}
+                            for name in ordered_spectra:
+                                if name in spectra_data:
+                                    spectra_for_preproc[name] = spectra_data[name]
+                            try:
+                                processed = preprocess_spectra_cached(
+                                    "current", spectra_for_preproc,
+                                    st.session_state.preproc_despike_enabled,
+                                    st.session_state.preproc_despike_kernel,
+                                    st.session_state.preproc_despike_threshold,
+                                    st.session_state.preproc_denoise_enabled,
+                                    st.session_state.preproc_denoise_method,
+                                    st.session_state.preproc_denoise_window,
+                                    st.session_state.preproc_denoise_polyorder,
+                                    st.session_state.preproc_denoise_sigma,
+                                    st.session_state.preproc_baseline_enabled,
+                                    st.session_state.preproc_baseline_method,
+                                    st.session_state.preproc_baseline_lam,
+                                    st.session_state.preproc_baseline_p,
+                                    st.session_state.preproc_baseline_diff_order,
+                                    st.session_state.preproc_baseline_max_iter,
+                                    st.session_state.preproc_baseline_tol,
+                                    st.session_state.preproc_baseline_polyorder
+                                )
+                                st.session_state.preproc_cached_spectra = processed
+                                st.session_state.preproc_applied = True
+                                st.session_state.preproc_version += 1
+                                st.success(f"✅ Preprocessing applied to {len(processed)} spectra.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Preprocessing failed: {e}")
+
+                        if st.session_state.preproc_applied:
+                            st.info(f"✅ Preprocessing active (version {st.session_state.preproc_version})")
+                            if st.button("↩️ Disable Preprocessing", use_container_width=True, key="disable_preprocessing_btn"):
+                                st.session_state.preproc_cached_spectra = None
+                                st.session_state.preproc_applied = False
+                                st.session_state.preproc_version += 1
+                                st.rerun()
+
+                    with st.expander("🎯 Peak Detection Parameters", expanded=False):
+                        st.markdown("*Global parameters for `find_peaks`. Used in Peak Analysis and Voigt Fitting.*")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            peak_det_height_factor = st.number_input(
+                                "Height factor (× max intensity)",
+                                min_value=0.001, max_value=1.0,
+                                value=float(st.session_state.peak_det_height_factor),
+                                step=0.001, format="%.3f", key="peak_det_height_inp"
+                            )
+                            st.session_state.peak_det_height_factor = float(peak_det_height_factor)
+                            peak_det_min_distance = st.number_input(
+                                "Minimum distance (points)", min_value=1, max_value=200,
+                                value=int(st.session_state.peak_det_min_distance), step=1,
+                                key="peak_det_min_dist_inp"
+                            )
+                            st.session_state.peak_det_min_distance = int(peak_det_min_distance)
+                        with col2:
+                            peak_det_prominence_factor = st.number_input(
+                                "Prominence factor (× max intensity)",
+                                min_value=0.001, max_value=1.0,
+                                value=float(st.session_state.peak_det_prominence_factor),
+                                step=0.001, format="%.3f", key="peak_det_prom_inp"
+                            )
+                            st.session_state.peak_det_prominence_factor = float(peak_det_prominence_factor)
+                            peak_det_min_height_abs = st.number_input(
+                                "Absolute min height (for Voigt)", min_value=0.0, max_value=1e9,
+                                value=float(st.session_state.peak_det_min_height_abs),
+                                step=0.01, format="%.3f", key="peak_det_min_h_inp"
+                            )
+                            st.session_state.peak_det_min_height_abs = float(peak_det_min_height_abs)
 
                     st.markdown("#### 📊 X-axis Ranges")
                     x_range_option = st.radio(
@@ -3184,7 +4238,6 @@ def main():
                         'inferno': 'Inferno (perceptual)',
                         'magma': 'Magma (perceptual)',
                         'BrBG': 'Brown-Blue-Green (diverging)',
-                        'twilight_shifted': 'Twilight Shifted (cyclic)'
                     }
 
                     selected_gradient_palette = st.selectbox(
@@ -3287,9 +4340,15 @@ def main():
                         else:
                             st.session_state.cached_spectra_data['spectra_data'] = spectra_data
 
+                    if st.session_state.preproc_applied and st.session_state.preproc_cached_spectra is not None:
+                        spectra_data_effective = st.session_state.preproc_cached_spectra
+                    else:
+                        spectra_data_effective = spectra_data
+
                     st.session_state.spectra_loaded = True
                     st.session_state.cached_spectra_data = {
-                        'spectra_data': spectra_data,
+                        'spectra_data': spectra_data_effective,
+                        'spectra_data_raw': spectra_data,
                         'ordered_spectra': ordered_spectra,
                         'x_label': x_label,
                         'y_label': y_label,
@@ -3311,7 +4370,9 @@ def main():
                         'legend_offset': legend_offset,
                         'gradient_palette': st.session_state.gradient_palette,
                         'gradient_applied': st.session_state.gradient_applied,
-                        'gradient_colors_cache': st.session_state.gradient_colors_cache
+                        'gradient_colors_cache': st.session_state.gradient_colors_cache,
+                        'preproc_applied': st.session_state.preproc_applied,
+                        'preproc_version': st.session_state.preproc_version,
                     }
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -3319,7 +4380,7 @@ def main():
         st.markdown("---")
         st.markdown("""
         <div style="text-align: center; font-size: 0.8rem; color: #666;">
-            <p>🔬 SpectrAnalys v2.0<br>Scientific Spectroscopic Analysis</p>
+            <p>🔬 SpectrAnalys v2.1<br>Scientific Spectroscopic Analysis</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -3362,10 +4423,11 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         with col4:
+            preproc_label = "On" if st.session_state.get('preproc_applied', False) else "Off"
             st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">{'✓' if st.session_state.get('peak_enabled', False) else '✗'}</div>
-                <div class="metric-label">Peak Analysis</div>
+                <div class="metric-value">{preproc_label}</div>
+                <div class="metric-label">Preprocessing</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -3380,6 +4442,7 @@ def main():
         tab_names = [
             "Combined Spectra Visualization",
             "Advanced Peak Analysis",
+            "Spectral Decomposition",
             "Parameter Correlation",
             "Compare Two Spectra",
             "Spectral Markers",
@@ -3408,6 +4471,8 @@ def main():
             render_combined_tab(cached, filtered_spectra, x_ranges)
         elif selected_tab == "Advanced Peak Analysis":
             render_peak_tab(cached, filtered_spectra)
+        elif selected_tab == "Spectral Decomposition":
+            render_voigt_tab(cached, filtered_spectra, ordered_spectra)
         elif selected_tab == "Parameter Correlation":
             render_correlation_tab(cached, filtered_spectra, ordered_spectra)
         elif selected_tab == "Compare Two Spectra":
@@ -3423,7 +4488,7 @@ def main():
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
         st.subheader("📤 Data Export")
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             if filtered_spectra:
@@ -3440,13 +4505,37 @@ def main():
                         export_data = pd.concat([export_data, temp_df], axis=1)
                 csv = export_data.to_csv(index=False)
                 st.download_button(
-                    label="📥 Export Raw Data (CSV)",
+                    label="📥 Export Preprocessed Data (CSV)",
                     data=csv,
-                    file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    file_name=f"preprocessed_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv"
                 )
 
         with col2:
+            if st.session_state.get('spectra_data_raw') or cached.get('spectra_data_raw'):
+                raw_dict = cached.get('spectra_data_raw', {})
+                export_raw = pd.DataFrame()
+                for name in ordered_spectra:
+                    if name in raw_dict:
+                        data = raw_dict[name]['data']
+                        temp_df = pd.DataFrame({
+                            f"{name.replace('.txt', '')}_x": data['x'].values,
+                            f"{name.replace('.txt', '')}_y_raw": data['y'].values
+                        })
+                        if export_raw.empty:
+                            export_raw = temp_df
+                        else:
+                            export_raw = pd.concat([export_raw, temp_df], axis=1)
+                if not export_raw.empty:
+                    csv_raw = export_raw.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export Raw Data (CSV, original)",
+                        data=csv_raw,
+                        file_name=f"raw_spectra_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+
+        with col3:
             if filtered_spectra:
                 export_norm = pd.DataFrame()
                 for name, spec in filtered_spectra.items():
@@ -3471,7 +4560,7 @@ def main():
                     mime="text/csv"
                 )
 
-        with col3:
+        with col4:
             session_info = f"""SpectrAnalys Analysis Session
 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 Spectra Files: {', '.join(ordered_spectra)}
@@ -3484,7 +4573,14 @@ Fill Transparency: {cached['fill_alpha']}
 Subtract Minimum Intensity: {cached['subtract_min_intensity']}
 Grid Enabled: {cached['show_grid']}
 Line Width: {cached['line_width']}
+Preprocessing Applied: {st.session_state.get('preproc_applied', False)}
+Preprocessing Version: {st.session_state.get('preproc_version', 0)}
+Despike: {st.session_state.get('preproc_despike_enabled', False)}
+Denoise: {st.session_state.get('preproc_denoise_enabled', False)} ({st.session_state.get('preproc_denoise_method', 'N/A')})
+Baseline: {st.session_state.get('preproc_baseline_enabled', False)} ({st.session_state.get('preproc_baseline_method', 'N/A')})
+Peak Detection: height={st.session_state.get('peak_det_height_factor', 0.05)}, prominence={st.session_state.get('peak_det_prominence_factor', 0.03)}, distance={st.session_state.get('peak_det_min_distance', 5)}
 Peak Analysis: {st.session_state.get('peak_enabled', False)}
+Voigt Fitting: {st.session_state.get('voigt_fit_triggered', False)}
 Correlation Analysis: {st.session_state.get('correlation_enabled', False)}
 Spectral Markers: {len(st.session_state.spectral_markers)} markers
 3D Graphs Enabled: {st.session_state.get('enable_3d_graphs', False)}
@@ -3508,34 +4604,34 @@ Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
         st.markdown("### 📖 Quick Start Guide:")
         st.markdown("""
         1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
-        2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
+        2. **Configure Processing** - Preprocessing (despike, denoise, baseline), normalization, colors, offsets
         3. **Visualize** - Explore combined spectra visualization with multiple display modes
         4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
-        5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
-        6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
-        7. **Add Markers** - Place vertical lines and regions to track spectral features
-        8. **3D Visualization** - Explore spectra in 3D with surface and line plots
-        9. **Heatmaps** - Generate heatmaps for temperature/concentration dependence
-        10. **Export Results** - Download processed data, plots, and analysis results
+        5. **Voigt Decomposition** - Decompose complex spectra into individual Voigt components
+        6. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
+        7. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
+        8. **Add Markers** - Place vertical lines and regions to track spectral features
+        9. **3D Visualization** - Explore spectra in 3D with surface and line plots
+        10. **Heatmaps** - Generate heatmaps for temperature/concentration dependence
+        11. **Export Results** - Download processed data, plots, and analysis results
         """)
 
         st.markdown("### ✨ Key Features:")
         st.markdown("""
+        - 🧹 **Preprocessing Pipeline** - Despiking (Whitaker-Hayes), denoising (SavGol/Gaussian/Whittaker), baseline correction (10+ methods via pybaselines)
+        - 🎯 **Global Peak Detection** - Configurable height/prominence/distance used across all analyses
         - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
         - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
         - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
+        - 🧬 **Voigt Decomposition** - Iterative residual-based fitting with lmfit; full parameter table with errors
         - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
         - 🔗 **Parameter Correlation** - Correlate spectral features with experimental parameters
         - 🔀 **Spectral Comparison** - Compare two spectra with difference analysis and heatmap visualization
         - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
         - 📏 **Spectral Markers** - Add vertical lines and regions to track peak positions across conditions
         - 🎲 **3D Visualization** - Surface and line plots for comprehensive spectral analysis
-        - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
+        - 💾 **Data Export** - Download raw, preprocessed, and normalized data in CSV format
         - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
-        - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
-        - 🎛️ **Adjustable Transparency** - Control fill opacity from 0.2 to 0.9
-        - ⚙️ **Grid & Line Thickness** - Customize plot appearance
-        - 🎨 **Gradient Color Assignment** - Automatically assign colors using gradient palettes
         - ⚡ **Fragment Isolation** - Each tab runs independently for fast interactions
         """)
 
