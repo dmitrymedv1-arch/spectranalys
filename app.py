@@ -2247,13 +2247,12 @@ def render_markers_tab(cached, filtered_spectra):
     all_x = []
     for spec in selected_spectra.values():
         all_x.extend(spec['data']['x'].values)
-    if all_x:
-        global_min_x = float(np.min(all_x))
-        global_max_x = float(np.max(all_x))
-    else:
+    if not all_x:
         st.warning("No data available in selected spectra")
         st.markdown('</div>', unsafe_allow_html=True)
         return
+    global_min_x = float(np.min(all_x))
+    global_max_x = float(np.max(all_x))
 
     pending_idx = st.session_state.pending_marker_index
     pending_line = None
@@ -2262,10 +2261,93 @@ def render_markers_tab(cached, filtered_spectra):
         if candidate.get('pending', False):
             pending_line = candidate
 
-    marker_controls_fragment(global_min_x, global_max_x)
+    st.markdown("---")
+    st.markdown("#### ✏️ Add New Marker")
+
+    if pending_line is None:
+        st.info("📍 **Step 1: Add a vertical line** — move the slider to preview the position, then click **Add Line**.")
+        col1, col2 = st.columns(2)
+        with col1:
+            marker_position = st.slider(
+                "Line position (X value)",
+                min_value=global_min_x, max_value=global_max_x,
+                value=(global_min_x + global_max_x) / 2,
+                step=(global_max_x - global_min_x) / 500,
+                key="marker_position_slider"
+            )
+            st.session_state.spectral_markers_preview_position = marker_position
+            st.session_state.spectral_markers_preview_width = 0
+        with col2:
+            marker_color = st.color_picker(
+                "Marker color",
+                value=st.session_state.spectral_markers_temp_color,
+                key="marker_color_picker"
+            )
+            st.session_state.spectral_markers_temp_color = marker_color
+        marker_name = st.text_input(
+            "Marker name (optional)",
+            value=st.session_state.spectral_markers_temp_name,
+            placeholder="e.g., I, Peak 1, Marker A",
+            key="marker_name_input"
+        )
+        st.session_state.spectral_markers_temp_name = marker_name
+
+        if st.button("➕ Add Line", use_container_width=True, key="add_line_btn"):
+            new_marker = {
+                'type': 'line',
+                'position': marker_position,
+                'width': 0,
+                'name': marker_name if marker_name else "",
+                'color': marker_color,
+                'pending': True
+            }
+            st.session_state.spectral_markers.append(new_marker)
+            st.session_state.pending_marker_index = len(st.session_state.spectral_markers) - 1
+            st.session_state.spectral_markers_temp_name = ""
+            st.session_state.spectral_markers_update_needed = True
+            st.rerun(scope="fragment")
+
+        if st.session_state.spectral_markers:
+            confirmed_count = len([m for m in st.session_state.spectral_markers if not m.get('pending', False)])
+            st.info(f"ℹ️ You have {confirmed_count} confirmed markers.")
+    else:
+        st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region** — move the slider to preview the region width.")
+        region_width = st.slider(
+            "Region half-width",
+            min_value=0.1, max_value=(global_max_x - global_min_x) / 4,
+            value=min(5.0, (global_max_x - global_min_x) / 20),
+            step=0.1,
+            key="region_width_slider"
+        )
+        st.session_state.spectral_markers_preview_position = pending_line['position']
+        st.session_state.spectral_markers_preview_width = region_width
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Confirm Region", use_container_width=True, key="confirm_region_btn"):
+                idx = st.session_state.pending_marker_index
+                if idx is not None and 0 <= idx < len(st.session_state.spectral_markers):
+                    st.session_state.spectral_markers[idx]['type'] = 'region'
+                    st.session_state.spectral_markers[idx]['width'] = region_width
+                    st.session_state.spectral_markers[idx]['pending'] = False
+                    st.session_state.spectral_markers_update_needed = True
+                    st.session_state.spectral_markers_preview_width = 0
+                    st.session_state.pending_marker_index = None
+                    st.rerun(scope="fragment")
+        with col2:
+            if st.button("❌ Cancel Region", use_container_width=True, key="cancel_region_btn"):
+                idx = st.session_state.pending_marker_index
+                if idx is not None and 0 <= idx < len(st.session_state.spectral_markers):
+                    st.session_state.spectral_markers[idx]['pending'] = False
+                    st.session_state.spectral_markers[idx]['type'] = 'line'
+                    st.session_state.spectral_markers_update_needed = True
+                    st.session_state.spectral_markers_preview_width = 0
+                    st.session_state.pending_marker_index = None
+                    st.rerun(scope="fragment")
 
     st.markdown("---")
     st.markdown("#### 📊 Plot with Markers")
+    st.markdown("*Preview (gray dashed) updates live as you move the slider. Confirmed markers are shown in their assigned colors.*")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2285,11 +2367,46 @@ def render_markers_tab(cached, filtered_spectra):
         if not show_preview:
             st.caption("🔒 Preview hidden. All markers are confirmed.")
 
-    render_markers_plot_fragment(
-        selected_spectra, selected_offset_step, selected_fill,
-        selected_normalized, selected_use_offset, selected_yl,
-        cached, x_ranges, show_values, show_preview, pending_line is not None
+    is_region_mode = pending_line is not None
+    preview_position = st.session_state.spectral_markers_preview_position
+    preview_width = st.session_state.spectral_markers_preview_width
+
+    if pending_line is not None:
+        preview_position = pending_line['position']
+    elif preview_position is None:
+        preview_position = (global_min_x + global_max_x) / 2
+
+    fig_markers = create_spectral_markers_plot(
+        selected_spectra, cached['x_label'], selected_yl,
+        selected_offset_step, selected_fill, selected_normalized,
+        selected_use_offset, x_ranges, cached['subtract_min_intensity'],
+        cached['fill_alpha'], cached['show_grid'], cached['line_width'],
+        cached['fig_width'], cached['fig_height'],
+        cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
+        st.session_state.spectral_markers,
+        preview_position,
+        preview_width,
+        show_values,
+        is_region_mode,
+        show_preview
     )
+    st.pyplot(fig_markers)
+    buf = BytesIO()
+    fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+    buf.seek(0)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    st.markdown(f"""
+    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+        <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           color: white; border: none; border-radius: 8px; 
+                           padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                📥 Download Plot with Markers (PNG, 600 dpi)
+            </button>
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
+    plt.close(fig_markers)
 
     if st.session_state.spectral_markers_update_needed:
         st.session_state.spectral_markers_update_needed = False
@@ -2332,9 +2449,10 @@ def render_markers_tab(cached, filtered_spectra):
                     with col7:
                         if st.button("🗑️", key=f"delete_marker_{row['index']}"):
                             st.session_state.spectral_markers.pop(row['index'])
+                            st.session_state.pending_marker_index = None
                             st.session_state.spectral_markers_update_needed = True
                             st.rerun(scope="fragment")
-                if st.button("🗑️ Clear All Markers", use_container_width=True):
+                if st.button("🗑️ Clear All Markers", use_container_width=True, key="clear_all_markers_btn"):
                     st.session_state.spectral_markers = []
                     st.session_state.spectral_markers_preview_position = None
                     st.session_state.spectral_markers_preview_width = 0
