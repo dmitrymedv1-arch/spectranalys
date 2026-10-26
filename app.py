@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, peak_widths, savgol_filter
+from scipy.signal import find_peaks
 from scipy.integrate import simpson
 from io import StringIO, BytesIO
 import re
@@ -10,19 +10,14 @@ from datetime import datetime
 import base64
 from scipy.stats import pearsonr
 from scipy.optimize import curve_fit
-from scipy.ndimage import gaussian_filter1d, gaussian_filter
-from scipy.special import wofz
-from scipy.interpolate import interp1d
-from scipy import sparse
-from scipy.sparse.linalg import spsolve
+from scipy.ndimage import gaussian_filter1d
 import os
+import base64
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator
 import matplotlib.colors as mcolors
 from matplotlib.collections import PolyCollection
-from lmfit import Parameters
-from lmfit.models import VoigtModel, GaussianModel, LorentzianModel, PseudoVoigtModel
 
 st.set_page_config(
     page_title="SpectrAnalys",
@@ -133,15 +128,6 @@ if 'peak_enabled' not in st.session_state:
     st.session_state.peak_enabled = False
 if 'correlation_enabled' not in st.session_state:
     st.session_state.correlation_enabled = False
-
-if 'fitting_results' not in st.session_state:
-    st.session_state.fitting_results = None
-if 'fitting_preprocessed' not in st.session_state:
-    st.session_state.fitting_preprocessed = None
-if 'fitting_target_spectrum' not in st.session_state:
-    st.session_state.fitting_target_spectrum = None
-if 'fitting_manual_peaks' not in st.session_state:
-    st.session_state.fitting_manual_peaks = []
 
 def load_instruction_html():
     try:
@@ -706,6 +692,41 @@ def calculate_fwhm(x, y, peak_idx):
     fwhm = x_right - x_left
     return max(fwhm, 0)
 
+@st.cache_data
+def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_data_pickle):
+    spectra_dict = spectra_data_pickle
+    results = []
+    for name, spec in spectra_dict.items():
+        data = spec['data']
+        x_full = data['x'].values
+        y_full = data['y'].values
+        if x_range[0] is not None and x_range[1] is not None:
+            mask = (x_full >= x_range[0]) & (x_full <= x_range[1])
+            x = x_full[mask]
+            y = y_full[mask]
+        else:
+            x = x_full
+            y = y_full
+        if len(x) == 0:
+            continue
+        peaks, properties = find_peaks(y, height=np.max(y)*0.05, prominence=np.max(y)*0.03, distance=5)
+        for peak_idx in peaks:
+            peak_x = x[peak_idx]
+            peak_y = y[peak_idx]
+            left_idx = max(0, peak_idx - peak_width)
+            right_idx = min(len(x), peak_idx + peak_width)
+            area = simpson(y[left_idx:right_idx+1], x[left_idx:right_idx+1])
+            fwhm = calculate_fwhm(x, y, peak_idx)
+            results.append({
+                'Spectrum': name.replace('.txt', ''),
+                'Peak position': peak_x,
+                'Intensity': peak_y,
+                'Area': area,
+                'FWHM': fwhm,
+                'Include': True
+            })
+    return pd.DataFrame(results) if results else pd.DataFrame()
+
 def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
     results = []
     for name, spec in spectra_dict.items():
@@ -1000,6 +1021,79 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
     plt.tight_layout()
     return fig
 
+@st.cache_data
+def prepare_heatmap_data_cached(spectra_names, spectra_hash, spectra_data_pickle, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
+    spectra_dict = spectra_data_pickle
+    all_x = []
+    for name in ordered_spectra:
+        if name in spectra_dict:
+            x_vals = spectra_dict[name]['data']['x'].values
+            if len(x_vals) > 0:
+                all_x.extend(x_vals)
+    if not all_x:
+        return None, None, None, None
+    if x_ranges is not None and len(x_ranges) > 0:
+        range_starts = [start for start, end in x_ranges]
+        range_ends = [end for start, end in x_ranges]
+        x_min = min(range_starts)
+        x_max = max(range_ends)
+        has_data_in_ranges = True
+        for name in ordered_spectra:
+            if name in spectra_dict:
+                x_vals = spectra_dict[name]['data']['x'].values
+                in_range = False
+                for start, end in x_ranges:
+                    mask = (x_vals >= start) & (x_vals <= end)
+                    if np.any(mask):
+                        in_range = True
+                        break
+                if not in_range:
+                    has_data_in_ranges = False
+                    break
+        if not has_data_in_ranges:
+            x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+            x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    else:
+        x_min = max([spectra_dict[name]['data']['x'].min() for name in ordered_spectra if name in spectra_dict])
+        x_max = min([spectra_dict[name]['data']['x'].max() for name in ordered_spectra if name in spectra_dict])
+    if x_min >= x_max:
+        return None, None, None, None
+    common_x = np.linspace(x_min, x_max, 2000)
+    spectra_matrix = []
+    spectra_norm_matrix = []
+    y_values = []
+    for name in ordered_spectra:
+        if name not in spectra_dict or name not in heatmap_params:
+            continue
+        data = spectra_dict[name]['data']
+        x_orig = data['x'].values
+        y_orig = data['y'].values
+        if x_ranges is not None and len(x_ranges) > 0:
+            mask_total = np.zeros_like(x_orig, dtype=bool)
+            for start, end in x_ranges:
+                mask_range = (x_orig >= start) & (x_orig <= end)
+                mask_total = mask_total | mask_range
+            if np.any(mask_total):
+                x_cropped = x_orig[mask_total]
+                y_cropped = y_orig[mask_total]
+            else:
+                x_cropped = x_orig
+                y_cropped = y_orig
+        else:
+            x_cropped = x_orig
+            y_cropped = y_orig
+        if len(x_cropped) == 0:
+            continue
+        y_interp = np.interp(common_x, x_cropped, y_cropped)
+        y_norm = normalize_spectrum(common_x, y_interp, norm_method, norm_range, x_ranges)
+        spectra_matrix.append(y_interp)
+        spectra_norm_matrix.append(y_norm)
+        param_value = heatmap_params[name]
+        y_values.append(param_value)
+    if not spectra_matrix:
+        return None, None, None, None
+    return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
+
 def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
     all_x = []
     for name in ordered_spectra:
@@ -1072,6 +1166,100 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     if not spectra_matrix:
         return None, None, None, None
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
+
+@st.fragment
+def marker_controls_fragment(global_min_x, global_max_x):
+    pending_idx = st.session_state.pending_marker_index
+    pending_line = None
+    if pending_idx is not None and 0 <= pending_idx < len(st.session_state.spectral_markers):
+        candidate = st.session_state.spectral_markers[pending_idx]
+        if candidate.get('pending', False):
+            pending_line = candidate
+
+    st.markdown("---")
+    st.markdown("#### ✏️ Add New Marker")
+
+    if pending_line is None:
+        st.info("📍 **Step 1: Add a vertical line**")
+        col1, col2 = st.columns(2)
+        with col1:
+            marker_position = st.slider(
+                "Line position (X value)",
+                min_value=global_min_x, max_value=global_max_x,
+                value=(global_min_x + global_max_x) / 2,
+                step=(global_max_x - global_min_x) / 500,
+                key="marker_position_slider"
+            )
+            st.session_state.spectral_markers_preview_position = marker_position
+        with col2:
+            marker_color = st.color_picker(
+                "Marker color",
+                value=st.session_state.spectral_markers_temp_color,
+                key="marker_color_picker"
+            )
+            st.session_state.spectral_markers_temp_color = marker_color
+        marker_name = st.text_input(
+            "Marker name (optional)",
+            value=st.session_state.spectral_markers_temp_name,
+            placeholder="e.g., I, Peak 1, Marker A",
+            key="marker_name_input"
+        )
+        st.session_state.spectral_markers_temp_name = marker_name
+
+        if st.button("➕ Add Line", use_container_width=True):
+            new_marker = {
+                'type': 'line',
+                'position': marker_position,
+                'width': 0,
+                'name': marker_name if marker_name else "",
+                'color': marker_color,
+                'pending': True
+            }
+            st.session_state.spectral_markers.append(new_marker)
+            st.session_state.pending_marker_index = len(st.session_state.spectral_markers) - 1
+            st.session_state.spectral_markers_temp_name = ""
+            st.session_state.spectral_markers_update_needed = True
+            st.success(f"✅ Line added at position {marker_position:.1f}. Now you can expand it to a region!")
+            st.rerun(scope="fragment")
+
+        if st.session_state.spectral_markers:
+            confirmed_count = len([m for m in st.session_state.spectral_markers if not m.get('pending', False)])
+            st.info(f"ℹ️ You have {confirmed_count} confirmed markers. Add a new line above.")
+    else:
+        st.info(f"📍 **Step 2: Expand line at {pending_line['position']:.1f} to a region**")
+        st.markdown("*Use the slider below to set the region width (half-width on each side)*")
+        region_width = st.slider(
+            "Region half-width",
+            min_value=0.1, max_value=(global_max_x - global_min_x) / 4,
+            value=min(5.0, (global_max_x - global_min_x) / 20),
+            step=0.1,
+            key="region_width_slider"
+        )
+        st.session_state.spectral_markers_preview_width = region_width
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Confirm Region", use_container_width=True):
+                idx = st.session_state.pending_marker_index
+                if idx is not None and 0 <= idx < len(st.session_state.spectral_markers):
+                    st.session_state.spectral_markers[idx]['type'] = 'region'
+                    st.session_state.spectral_markers[idx]['width'] = region_width
+                    st.session_state.spectral_markers[idx]['pending'] = False
+                    st.session_state.spectral_markers_update_needed = True
+                    st.success(f"✅ Region added: center={pending_line['position']:.1f}, half-width={region_width:.1f}")
+                    st.session_state.spectral_markers_preview_width = 0
+                    st.session_state.pending_marker_index = None
+                    st.rerun(scope="fragment")
+        with col2:
+            if st.button("❌ Cancel Region", use_container_width=True):
+                idx = st.session_state.pending_marker_index
+                if idx is not None and 0 <= idx < len(st.session_state.spectral_markers):
+                    st.session_state.spectral_markers[idx]['pending'] = False
+                    st.session_state.spectral_markers[idx]['type'] = 'line'
+                    st.session_state.spectral_markers_update_needed = True
+                    st.info(f"⏹️ Line kept at position {pending_line['position']:.1f} (not expanded to region)")
+                    st.session_state.spectral_markers_preview_width = 0
+                    st.session_state.pending_marker_index = None
+                    st.rerun(scope="fragment")
 
 def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                                   fill_area, normalized, use_offset, x_ranges,
@@ -1425,816 +1613,24 @@ def extract_number_from_filename(filename):
         return float(numbers[0])
     return None
 
-def despike_raman(x, y, moving_average=5, threshold=7):
-    """Remove cosmic ray spikes using modified Z-score (Whitaker-Hayes)."""
-    y = np.asarray(y, dtype=float)
-    if len(y) < 3:
-        return y.copy()
-    y_diff = np.diff(y)
-    median_y = np.median(y_diff)
-    mad_y = np.median(np.abs(y_diff - median_y))
-    if mad_y <= 0 or not np.isfinite(mad_y):
-        return y.copy()
-    z_scores = 0.6745 * (y_diff - median_y) / mad_y
-    spikes_diff = np.abs(z_scores) > threshold
-    spikes = np.zeros(len(y), dtype=bool)
-    spikes[1:] = spikes_diff
-    y_out = y.copy()
-    for i in range(len(y)):
-        if spikes[i]:
-            lo = max(0, i - moving_average)
-            hi = min(len(y), i + moving_average + 1)
-            neighbors = np.arange(lo, hi)
-            valid = neighbors[~spikes[neighbors]]
-            if len(valid) > 0:
-                y_out[i] = np.median(y[valid])
-    return y_out
-
-def savgol_denoise(y, window_length=9, polyorder=3):
-    """Savitzky-Golay denoising."""
-    y = np.asarray(y, dtype=float)
-    if len(y) < window_length:
-        return y.copy()
-    if window_length % 2 == 0:
-        window_length = window_length + 1
-    if window_length <= polyorder:
-        polyorder = max(1, window_length - 2)
-    return savgol_filter(y, window_length=window_length, polyorder=polyorder)
-
-def gaussian_denoise(y, sigma=1.0):
-    """Gaussian filter denoising."""
-    y = np.asarray(y, dtype=float)
-    if len(y) < 2:
-        return y.copy()
-    return gaussian_filter(y, sigma=sigma)
-
-def estimate_baseline_asls(y, lam=1e6, p=0.01, niter=10):
-    """Asymmetric Least Squares baseline."""
-    y = np.asarray(y, dtype=float)
-    L = len(y)
-    if L < 3:
-        return np.zeros_like(y)
-    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
-    D = lam * D.dot(D.transpose())
-    w = np.ones(L)
-    z = y.copy()
-    for _ in range(niter):
-        W = sparse.spdiags(w, 0, L, L)
-        Z = W + D
-        z = spsolve(Z, w * y)
-        w = p * (y > z) + (1 - p) * (y < z)
-    return z
-
-def estimate_baseline_iarpls(y, lam=1e5, niter=50, epsilon=1e-6):
-    """Improved Asymmetrically Reweighted PLS baseline."""
-    y = np.asarray(y, dtype=float)
-    L = len(y)
-    if L < 3:
-        return np.zeros_like(y)
-    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
-    D = lam * D.dot(D.transpose())
-    w = np.ones(L)
-    z = np.zeros(L)
-    for t in range(1, niter + 1):
-        W = sparse.spdiags(w, 0, L, L)
-        Z = W + D
-        z_prev = z.copy()
-        z = spsolve(Z, w * y)
-        diff = y - z
-        neg_diff = diff[diff < 0]
-        sigma_d = np.std(neg_diff) if len(neg_diff) > 0 else 1e-8
-        w_prev = w.copy()
-        w = np.ones(L)
-        mask = diff > 0
-        if np.any(mask):
-            scaled = (diff[mask] - 2 * sigma_d) / sigma_d
-            with np.errstate(over='ignore', invalid='ignore'):
-                exp_term = np.exp(t * scaled)
-                denom = np.sqrt(1 + np.exp(2 * t * scaled))
-                w[mask] = 0.5 * (1 - exp_term / denom)
-        w = np.nan_to_num(w, nan=1.0, posinf=1.0, neginf=0.0)
-        if np.linalg.norm(w - w_prev) / (np.linalg.norm(w) + 1e-12) < epsilon:
-            break
-    return z
-
-def estimate_baseline_airpls(y, lam=1e5, niter=50, epsilon=1e-3):
-    """Adaptive Iteratively Reweighted PLS baseline."""
-    y = np.asarray(y, dtype=float)
-    L = len(y)
-    if L < 3:
-        return np.zeros_like(y)
-    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
-    D = lam * D.dot(D.transpose())
-    w = np.ones(L)
-    z = y.copy()
-    for i in range(1, niter + 1):
-        W = sparse.spdiags(w, 0, L, L)
-        Z = W + D
-        z = spsolve(Z, w * y)
-        diff = y - z
-        neg_sum = np.sum(np.abs(diff[diff < 0]))
-        if neg_sum < epsilon:
-            break
-        w = np.zeros(L)
-        mask = diff >= 0
-        if np.any(mask):
-            w[mask] = np.exp(i * np.abs(diff[mask]) / neg_sum)
-    return z
-
-def estimate_baseline_arpls(y, lam=1e5, niter=50, epsilon=1e-3):
-    """Asymmetrically Reweighted PLS baseline."""
-    y = np.asarray(y, dtype=float)
-    L = len(y)
-    if L < 3:
-        return np.zeros_like(y)
-    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
-    D = lam * D.dot(D.transpose())
-    w = np.ones(L)
-    z = y.copy()
-    for _ in range(niter):
-        W = sparse.spdiags(w, 0, L, L)
-        Z = W + D
-        z_prev = z.copy()
-        z = spsolve(Z, w * y)
-        diff = y - z
-        neg_diff = diff[diff < 0]
-        if len(neg_diff) == 0:
-            break
-        mean_d = np.mean(neg_diff)
-        std_d = np.std(neg_diff)
-        if std_d <= 0 or not np.isfinite(std_d):
-            break
-        w = np.ones(L)
-        mask = diff >= 0
-        if np.any(mask):
-            w[mask] = 1.0 / (1.0 + np.exp(2.0 * (diff[mask] - mean_d) / std_d))
-        if np.linalg.norm(z - z_prev) / (np.linalg.norm(z) + 1e-12) < epsilon:
-            break
-    return z
-
-def auc_normalize(x, y):
-    """Normalize by area under the curve."""
-    y = np.asarray(y, dtype=float)
-    if len(y) < 2:
-        return y
-    auc = np.trapz(y, x)
-    if auc == 0 or not np.isfinite(auc):
-        return y
-    return y / auc
-
-def vector_normalize(x, y):
-    """Normalize to unit L2 norm."""
-    y = np.asarray(y, dtype=float)
-    norm = np.linalg.norm(y)
-    if norm == 0 or not np.isfinite(norm):
-        return y
-    return y / norm
-
-def voigt_amplitude_from_height(height, sigma, gamma):
-    """Convert peak height to Voigt amplitude (via Faddeeva function)."""
-    denom = np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
-    if denom == 0 or not np.isfinite(denom):
-        return height
-    return height * sigma * np.sqrt(2 * np.pi) / denom
-
-def voigt_height(amplitude, sigma, gamma):
-    """Compute peak height from Voigt amplitude, sigma, gamma."""
-    return (amplitude / (sigma * np.sqrt(2 * np.pi))) * \
-           np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
-
-def create_residual_models(indices, xs, residuals, iteration,
-                           max_amplitude, max_sigma, max_gamma,
-                           center_vary, min_height, peak_function='Voigt'):
-    """Create models for residual peaks detected during iterative fitting."""
-    model = None
-    params = Parameters()
-    min_sigma = 1e-6
-    min_gamma = 1e-6
-    if len(indices) == 0:
-        return model, params
+def _dataframe_hash(df):
+    if df is None:
+        return 0
     try:
-        widths, width_heights, left_ips, right_ips = peak_widths(residuals, indices, rel_height=0.5)
+        return hash((tuple(df['x'].values.tobytes()), tuple(df['y'].values.tobytes())))
     except Exception:
-        widths = np.ones(len(indices)) * 5
-    dx = np.diff(xs).mean() if len(xs) > 1 else 1.0
-    fwhms = widths * dx
+        return hash(str(df.shape))
 
-    for idx, fwhm in zip(indices, fwhms):
-        pos = xs[idx]
-        height = residuals[idx]
-        sigma_guess = fwhm / (2 * np.sqrt(2 * np.log(2)))
-        gamma_guess = fwhm / 2
-        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
-        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
-        amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
-        amplitude_guess = np.clip(amplitude_guess, None, max_amplitude)
-        min_amplitude = voigt_amplitude_from_height(min_height, sigma_guess, gamma_guess)
-
-        prefix = f'iter{iteration}_p{idx}_'
-        if peak_function == 'Voigt':
-            peak_model = VoigtModel(prefix=prefix)
-        elif peak_function == 'Gaussian':
-            peak_model = GaussianModel(prefix=prefix)
-        elif peak_function == 'Lorentzian':
-            peak_model = LorentzianModel(prefix=prefix)
-        elif peak_function == 'PseudoVoigt':
-            peak_model = PseudoVoigtModel(prefix=prefix)
-        else:
-            peak_model = VoigtModel(prefix=prefix)
-
-        pars = peak_model.make_params()
-        if 'amplitude' in pars:
-            pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude,
-                                            max=max_amplitude, vary=True, expr=None)
-        if 'center' in pars:
-            pars[prefix + 'center'].set(value=pos, min=pos - center_vary,
-                                        max=pos + center_vary, vary=True, expr=None)
-        if 'sigma' in pars:
-            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma,
-                                       max=max_sigma, vary=True, expr=None)
-        if 'fwhm' in pars and 'sigma' not in pars:
-            pars[prefix + 'fwhm'].set(value=fwhm, min=min_sigma * 10,
-                                      max=max_sigma * 10, vary=True, expr=None)
-        if 'gamma' in pars:
-            pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma,
-                                       max=max_gamma, vary=True, expr=None)
-
-        if model is None:
-            model = peak_model
-        else:
-            model += peak_model
-        params.update(pars)
-
-    return model, params
-
-@st.cache_data
-def fit_peaks_iterative(x_bytes, y_bytes, peak_function='Voigt',
-                        threshold_factor=0.05, min_dist=2, min_height_factor=0.02,
-                        prominence_factor=0.03, reduce_factor=1,
-                        max_iterations=3, center_vary=5.0, min_height=2.0,
-                        fit_method='leastsq'):
-    """Iterative peak fitting with Voigt/Gaussian/Lorentzian/PseudoVoigt."""
-    x_full = np.frombuffer(x_bytes, dtype=np.float64)
-    y_full = np.frombuffer(y_bytes, dtype=np.float64)
-    if len(x_full) < 5:
-        return None, None, None, None, None
-    if reduce_factor > 1:
-        xs = x_full[::reduce_factor]
-        ys = y_full[::reduce_factor]
-    else:
-        xs = x_full
-        ys = y_full
-
-    y_max = np.max(ys)
-    if y_max <= 0:
-        return None, None, None, None, None
-    threshold = y_max * threshold_factor
-    min_height_abs = y_max * min_height_factor
-    prominence = y_max * prominence_factor if prominence_factor > 0 else None
-
-    peak_indices, properties = find_peaks(
-        ys, height=threshold, distance=min_dist, prominence=prominence)
-    num_peaks = len(peak_indices)
-    if num_peaks == 0:
-        return None, None, None, None, None
-
-    peak_positions = xs[peak_indices]
-    peak_heights_arr = ys[peak_indices]
-
+def _spectra_dict_hash(spectra_dict):
     try:
-        results_half = peak_widths(ys, peak_indices, rel_height=0.5)
-        width_in_samples = results_half[0]
+        items = []
+        for name in sorted(spectra_dict.keys()):
+            spec = spectra_dict[name]
+            df = spec['data']
+            items.append((name, _dataframe_hash(df), spec.get('color', '')))
+        return hash(tuple(items))
     except Exception:
-        width_in_samples = np.ones(num_peaks) * 5
-    dx = np.diff(xs).mean() if len(xs) > 1 else 1.0
-    fwhms = width_in_samples * dx
-    sigmas = fwhms / (2 * np.sqrt(2 * np.log(2)))
-    gammas = fwhms / 2
-
-    min_sigma = 1e-6
-    min_gamma = 1e-6
-    max_amplitude = y_max * np.pi * (xs.max() - xs.min()) / 2
-    max_sigma = (xs.max() - xs.min()) / 10
-    max_gamma = (xs.max() - xs.min()) / 10
-
-    model = None
-    params = Parameters()
-
-    for i in range(num_peaks):
-        prefix = f'p{i}_'
-        if peak_function == 'Voigt':
-            peak_model = VoigtModel(prefix=prefix)
-        elif peak_function == 'Gaussian':
-            peak_model = GaussianModel(prefix=prefix)
-        elif peak_function == 'Lorentzian':
-            peak_model = LorentzianModel(prefix=prefix)
-        elif peak_function == 'PseudoVoigt':
-            peak_model = PseudoVoigtModel(prefix=prefix)
-        else:
-            peak_model = VoigtModel(prefix=prefix)
-
-        pars = peak_model.make_params()
-        pos = peak_positions[i]
-        height = peak_heights_arr[i]
-        sigma_guess = sigmas[i] if len(sigmas) > i else (xs.max() - xs.min()) / 50
-        gamma_guess = gammas[i] if len(gammas) > i else (xs.max() - xs.min()) / 50
-        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
-        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
-        amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
-        amplitude_guess = np.clip(amplitude_guess, None, max_amplitude)
-        min_amplitude = voigt_amplitude_from_height(min_height_abs, sigma_guess, gamma_guess)
-
-        if 'amplitude' in pars:
-            pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude,
-                                            max=max_amplitude, vary=True, expr=None)
-        if 'center' in pars:
-            pars[prefix + 'center'].set(value=pos, min=pos - center_vary,
-                                        max=pos + center_vary, vary=True, expr=None)
-        if 'sigma' in pars:
-            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma,
-                                       max=max_sigma, vary=True, expr=None)
-        if 'fwhm' in pars and 'sigma' not in pars:
-            pars[prefix + 'fwhm'].set(value=fwhms[i] if len(fwhms) > i else 5.0,
-                                      min=min_sigma * 10, max=max_sigma * 10,
-                                      vary=True, expr=None)
-        if 'gamma' in pars:
-            pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma,
-                                       max=max_gamma, vary=True, expr=None)
-
-        if model is None:
-            model = peak_model
-        else:
-            model += peak_model
-        params.update(pars)
-
-    try:
-        final_result = model.fit(ys, params, x=xs, method=fit_method)
-    except Exception as e:
-        return None, None, None, None, None
-
-    params.update(final_result.params)
-
-    def _remove_negligible(model_in, params_in, result_in):
-        negligible_prefixes = []
-        for param_name in result_in.params:
-            if 'amplitude' in param_name:
-                prefix = param_name.split('amplitude')[0]
-                if prefix + 'sigma' in result_in.params:
-                    amplitude = result_in.params[prefix + 'amplitude'].value
-                    sigma = result_in.params[prefix + 'sigma'].value
-                    gamma = result_in.params[prefix + 'gamma'].value if prefix + 'gamma' in result_in.params else 0.0
-                    try:
-                        h = voigt_height(amplitude, sigma, gamma)
-                    except Exception:
-                        h = 0.0
-                    if h < min_height_abs * 1.1:
-                        negligible_prefixes.append(prefix)
-                else:
-                    amplitude = result_in.params[param_name].value
-                    if abs(amplitude) < min_height_abs:
-                        negligible_prefixes.append(prefix)
-
-        if not negligible_prefixes:
-            return model_in, params_in, result_in, False
-
-        for prefix in negligible_prefixes:
-            for par in list(params_in.keys()):
-                if par.startswith(prefix):
-                    del params_in[par]
-
-        model_new = None
-        prefixes_added = set()
-        for param_name in params_in:
-            prefix = '_'.join(param_name.split('_')[:-1]) + '_'
-            if prefix not in prefixes_added:
-                if peak_function == 'Voigt':
-                    pm = VoigtModel(prefix=prefix)
-                elif peak_function == 'Gaussian':
-                    pm = GaussianModel(prefix=prefix)
-                elif peak_function == 'Lorentzian':
-                    pm = LorentzianModel(prefix=prefix)
-                elif peak_function == 'PseudoVoigt':
-                    pm = PseudoVoigtModel(prefix=prefix)
-                else:
-                    pm = VoigtModel(prefix=prefix)
-                if model_new is None:
-                    model_new = pm
-                else:
-                    model_new += pm
-                prefixes_added.add(prefix)
-
-        if model_new is None:
-            return model_in, params_in, result_in, False
-
-        try:
-            result_new = model_new.fit(ys, params_in, x=xs, method=fit_method)
-        except Exception:
-            return model_in, params_in, result_in, False
-        params_in = result_new.params.copy()
-        return model_new, params_in, result_new, True
-
-    model, params, final_result, changed = _remove_negligible(model, params, final_result)
-    if changed:
-        params.update(final_result.params)
-
-    iteration = 0
-    while iteration < max_iterations:
-        residuals = ys - final_result.best_fit
-        try:
-            residual_peak_indices, _ = find_peaks(
-                residuals, height=threshold, distance=min_dist, prominence=prominence)
-        except Exception:
-            break
-        if len(residual_peak_indices) == 0:
-            break
-
-        model_new, params_new = create_residual_models(
-            residual_peak_indices, xs, residuals, iteration=iteration+1,
-            max_amplitude=max_amplitude, max_sigma=max_sigma, max_gamma=max_gamma,
-            center_vary=center_vary, min_height=min_height_abs,
-            peak_function=peak_function
-        )
-        if model_new is None:
-            break
-
-        model += model_new
-        params.update(params_new)
-        params.update(final_result.params)
-
-        try:
-            final_result = model.fit(ys, params, x=xs, method=fit_method)
-        except Exception:
-            break
-        params = final_result.params.copy()
-
-        model, params, final_result, changed = _remove_negligible(model, params, final_result)
-        if changed:
-            params.update(final_result.params)
-
-        iteration += 1
-
-    return xs, ys, model, params, final_result
-
-@st.cache_data
-def fit_peaks_preprocessed(x_bytes, y_bytes, peak_function='Voigt',
-                           threshold_factor=0.05, min_dist=2, min_height_factor=0.02,
-                           prominence_factor=0.03, reduce_factor=1,
-                           max_iterations=3, center_vary=5.0, min_height=2.0,
-                           fit_method='leastsq'):
-    x_full = np.frombuffer(x_bytes, dtype=np.float64)
-    y_full = np.frombuffer(y_bytes, dtype=np.float64)
-    if len(x_full) < 5:
-        return None
-    if reduce_factor > 1:
-        xs = x_full[::reduce_factor]
-        ys = y_full[::reduce_factor]
-    else:
-        xs = x_full
-        ys = y_full
-
-    y_max = np.max(ys)
-    if y_max <= 0:
-        return None
-    threshold = y_max * threshold_factor
-    min_height_abs = y_max * min_height_factor
-    prominence = y_max * prominence_factor if prominence_factor > 0 else None
-
-    peak_indices, properties = find_peaks(
-        ys, height=threshold, distance=min_dist, prominence=prominence)
-    num_peaks = len(peak_indices)
-    if num_peaks == 0:
-        return None
-
-    peak_positions = xs[peak_indices]
-    peak_heights_arr = ys[peak_indices]
-
-    try:
-        results_half = peak_widths(ys, peak_indices, rel_height=0.5)
-        width_in_samples = results_half[0]
-    except Exception:
-        width_in_samples = np.ones(num_peaks) * 5
-    dx = np.diff(xs).mean() if len(xs) > 1 else 1.0
-    fwhms = width_in_samples * dx
-    sigmas = fwhms / (2 * np.sqrt(2 * np.log(2)))
-    gammas = fwhms / 2
-
-    min_sigma = 1e-6
-    min_gamma = 1e-6
-    max_amplitude = y_max * np.pi * (xs.max() - xs.min()) / 2
-    max_sigma = (xs.max() - xs.min()) / 10
-    max_gamma = (xs.max() - xs.min()) / 10
-
-    model = None
-    params = Parameters()
-
-    for i in range(num_peaks):
-        prefix = f'p{i}_'
-        if peak_function == 'Voigt':
-            peak_model = VoigtModel(prefix=prefix)
-        elif peak_function == 'Gaussian':
-            peak_model = GaussianModel(prefix=prefix)
-        elif peak_function == 'Lorentzian':
-            peak_model = LorentzianModel(prefix=prefix)
-        elif peak_function == 'PseudoVoigt':
-            peak_model = PseudoVoigtModel(prefix=prefix)
-        else:
-            peak_model = VoigtModel(prefix=prefix)
-
-        pars = peak_model.make_params()
-        pos = peak_positions[i]
-        height = peak_heights_arr[i]
-        sigma_guess = sigmas[i] if len(sigmas) > i else (xs.max() - xs.min()) / 50
-        gamma_guess = gammas[i] if len(gammas) > i else (xs.max() - xs.min()) / 50
-        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
-        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
-        amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
-        amplitude_guess = np.clip(amplitude_guess, None, max_amplitude)
-        min_amplitude = voigt_amplitude_from_height(min_height_abs, sigma_guess, gamma_guess)
-
-        if 'amplitude' in pars:
-            pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude,
-                                            max=max_amplitude, vary=True, expr=None)
-        if 'center' in pars:
-            pars[prefix + 'center'].set(value=pos, min=pos - center_vary,
-                                        max=pos + center_vary, vary=True, expr=None)
-        if 'sigma' in pars:
-            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma,
-                                       max=max_sigma, vary=True, expr=None)
-        if 'fwhm' in pars and 'sigma' not in pars:
-            pars[prefix + 'fwhm'].set(value=fwhms[i] if len(fwhms) > i else 5.0,
-                                      min=min_sigma * 10, max=max_sigma * 10,
-                                      vary=True, expr=None)
-        if 'gamma' in pars:
-            pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma,
-                                       max=max_gamma, vary=True, expr=None)
-
-        if model is None:
-            model = peak_model
-        else:
-            model += peak_model
-        params.update(pars)
-
-    try:
-        final_result = model.fit(ys, params, x=xs, method=fit_method)
-    except Exception:
-        return None
-
-    params.update(final_result.params)
-
-    def _remove_negligible_2(model_in, params_in, result_in):
-        negligible_prefixes = []
-        for param_name in result_in.params:
-            if 'amplitude' in param_name:
-                prefix = param_name.split('amplitude')[0]
-                if prefix + 'sigma' in result_in.params:
-                    amplitude = result_in.params[prefix + 'amplitude'].value
-                    sigma = result_in.params[prefix + 'sigma'].value
-                    gamma = result_in.params[prefix + 'gamma'].value if prefix + 'gamma' in result_in.params else 0.0
-                    try:
-                        h = voigt_height(amplitude, sigma, gamma)
-                    except Exception:
-                        h = 0.0
-                    if h < min_height_abs * 1.1:
-                        negligible_prefixes.append(prefix)
-                else:
-                    amplitude = result_in.params[param_name].value
-                    if abs(amplitude) < min_height_abs:
-                        negligible_prefixes.append(prefix)
-
-        if not negligible_prefixes:
-            return model_in, params_in, result_in, False
-
-        for prefix in negligible_prefixes:
-            for par in list(params_in.keys()):
-                if par.startswith(prefix):
-                    del params_in[par]
-
-        model_new = None
-        prefixes_added = set()
-        for param_name in params_in:
-            prefix = '_'.join(param_name.split('_')[:-1]) + '_'
-            if prefix not in prefixes_added:
-                if peak_function == 'Voigt':
-                    pm = VoigtModel(prefix=prefix)
-                elif peak_function == 'Gaussian':
-                    pm = GaussianModel(prefix=prefix)
-                elif peak_function == 'Lorentzian':
-                    pm = LorentzianModel(prefix=prefix)
-                elif peak_function == 'PseudoVoigt':
-                    pm = PseudoVoigtModel(prefix=prefix)
-                else:
-                    pm = VoigtModel(prefix=prefix)
-                if model_new is None:
-                    model_new = pm
-                else:
-                    model_new += pm
-                prefixes_added.add(prefix)
-
-        if model_new is None:
-            return model_in, params_in, result_in, False
-
-        try:
-            result_new = model_new.fit(ys, params_in, x=xs, method=fit_method)
-        except Exception:
-            return model_in, params_in, result_in, False
-        params_in = result_new.params.copy()
-        return model_new, params_in, result_new, True
-
-    model, params, final_result, changed = _remove_negligible_2(model, params, final_result)
-    if changed:
-        params.update(final_result.params)
-
-    iteration = 0
-    while iteration < max_iterations:
-        residuals = ys - final_result.best_fit
-        try:
-            residual_peak_indices, _ = find_peaks(
-                residuals, height=threshold, distance=min_dist, prominence=prominence)
-        except Exception:
-            break
-        if len(residual_peak_indices) == 0:
-            break
-
-        model_new, params_new = create_residual_models(
-            residual_peak_indices, xs, residuals, iteration=iteration+1,
-            max_amplitude=max_amplitude, max_sigma=max_sigma, max_gamma=max_gamma,
-            center_vary=center_vary, min_height=min_height_abs,
-            peak_function=peak_function
-        )
-        if model_new is None:
-            break
-
-        model += model_new
-        params.update(params_new)
-        params.update(final_result.params)
-
-        try:
-            final_result = model.fit(ys, params, x=xs, method=fit_method)
-        except Exception:
-            break
-        params = final_result.params.copy()
-
-        model, params, final_result, changed = _remove_negligible_2(model, params, final_result)
-        if changed:
-            params.update(final_result.params)
-
-        iteration += 1
-
-    return final_result
-
-def calculate_fit_metrics(xs, ys, result):
-    """Compute R², χ², RMSE for fit."""
-    if result is None:
-        return {'r_squared': None, 'chi_squared': None, 'rmse': None}
-    try:
-        y_fit = result.best_fit
-        y_data = ys
-        ss_res = np.sum((y_data - y_fit) ** 2)
-        ss_tot = np.sum((y_data - np.mean(y_data)) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else None
-        rmse = np.sqrt(ss_res / len(y_data)) if len(y_data) > 0 else None
-        chi_squared = ss_res
-        return {'r_squared': r_squared, 'chi_squared': chi_squared, 'rmse': rmse}
-    except Exception:
-        return {'r_squared': None, 'chi_squared': None, 'rmse': None}
-
-def extract_peak_params(result, peak_function='Voigt'):
-    """Extract peak parameters from lmfit result."""
-    if result is None:
-        return pd.DataFrame()
-    rows = []
-    params = result.params
-    prefixes = set()
-    for key in params.keys():
-        if 'amplitude' in key:
-            prefix = key.split('amplitude')[0]
-            prefixes.add(prefix)
-    for prefix in sorted(prefixes):
-        amp_key = prefix + 'amplitude'
-        cen_key = prefix + 'center'
-        sig_key = prefix + 'sigma'
-        gam_key = prefix + 'gamma'
-        fwhm_key = prefix + 'fwhm'
-
-        amp = params[amp_key].value if amp_key in params else None
-        amp_stderr = params[amp_key].stderr if amp_key in params else None
-        cen = params[cen_key].value if cen_key in params else None
-        cen_stderr = params[cen_key].stderr if cen_key in params else None
-        sig = params[sig_key].value if sig_key in params else None
-        sig_stderr = params[sig_key].stderr if sig_key in params else None
-        gam = params[gam_key].value if gam_key in params else None
-        gam_stderr = params[gam_key].stderr if gam_key in params else None
-        fwhm_val = params[fwhm_key].value if fwhm_key in params else None
-        fwhm_stderr = params[fwhm_key].stderr if fwhm_key in params else None
-
-        if sig is not None and gam is not None:
-            try:
-                height = voigt_height(amp, sig, gam)
-            except Exception:
-                height = None
-            fwhm_calc = 0.5346 * 2 * gam + np.sqrt(0.2166 * (2 * gam) ** 2 + (2.3548 * sig) ** 2) if gam > 0 else 2.3548 * sig
-        elif sig is not None:
-            height = amp / (sig * np.sqrt(2 * np.pi)) if sig > 0 else None
-            fwhm_calc = 2.3548 * sig
-        elif fwhm_val is not None:
-            height = None
-            fwhm_calc = fwhm_val
-        else:
-            height = None
-            fwhm_calc = None
-
-        rows.append({
-            'Peak': prefix.replace('_', '').rstrip('p'),
-            'Center': cen,
-            'Center ±': cen_stderr,
-            'Height': height,
-            'Amplitude': amp,
-            'Amplitude ±': amp_stderr,
-            'Sigma': sig,
-            'Sigma ±': sig_stderr,
-            'Gamma': gam,
-            'Gamma ±': gam_stderr,
-            'FWHM': fwhm_calc,
-            'FWHM ±': fwhm_stderr,
-        })
-    return pd.DataFrame(rows)
-
-def plot_fit_results(xs, ys, result, title="", show_components=True, show_residuals=True):
-    """Plot data, fit, components, residuals."""
-    if result is None:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.text(0.5, 0.5, 'No fit result', ha='center', va='center', transform=ax.transAxes)
-        return fig
-    if show_residuals:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8),
-                                       gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
-    else:
-        fig, ax1 = plt.subplots(figsize=(12, 6))
-        ax2 = None
-
-    ax1.plot(xs, ys, lw=1.2, label='Data', color='black', alpha=0.8)
-    ax1.plot(xs, result.best_fit, label='Fit', color='red', lw=2, ls='--')
-    if show_components:
-        try:
-            comps = result.eval_components(x=xs)
-            for key in comps:
-                ax1.plot(xs, comps[key], ls='-', alpha=0.6, lw=1.2, label=f'_{key}')
-        except Exception:
-            pass
-    ax1.set_ylabel("Intensity (a.u.)", fontsize=11, fontweight='bold')
-    ax1.set_title(title, fontsize=12, fontweight='bold')
-    ax1.legend(loc='best', fontsize=8, frameon=True, edgecolor='black')
-    ax1.grid(True, alpha=0.3, linestyle='--')
-    ax1.tick_params(direction='in', length=5, width=1)
-
-    if show_residuals and ax2 is not None:
-        residuals = ys - result.best_fit
-        ax2.plot(xs, residuals, label='Residuals', color='blue', lw=1)
-        ax2.axhline(0, color='black', linestyle='--', linewidth=0.8)
-        ax2.set_xlabel("Raman shift (cm⁻¹)", fontsize=11, fontweight='bold')
-        ax2.set_ylabel("Residuals", fontsize=11, fontweight='bold')
-        ax2.grid(True, alpha=0.3, linestyle='--')
-        ax2.tick_params(direction='in', length=5, width=1)
-
-    plt.tight_layout()
-    return fig
-
-@st.cache_data
-def apply_preprocessing_cached(x_bytes, y_bytes, despike_enabled, despike_ma, despike_thresh,
-                                denoise_method, denoise_param, denoise_param2,
-                                baseline_method, baseline_lam, baseline_p, baseline_niter,
-                                norm_method_pre):
-    x = np.frombuffer(x_bytes, dtype=np.float64)
-    y = np.frombuffer(y_bytes, dtype=np.float64)
-    y_proc = y.copy()
-    baseline_curve = None
-    if despike_enabled:
-        y_proc = despike_raman(x, y_proc, moving_average=despike_ma, threshold=despike_thresh)
-    if denoise_method == 'SavGol':
-        y_proc = savgol_denoise(y_proc, window_length=denoise_param, polyorder=denoise_param2)
-    elif denoise_method == 'Gaussian':
-        y_proc = gaussian_denoise(y_proc, sigma=denoise_param)
-    if baseline_method == 'AsLS':
-        baseline_curve = estimate_baseline_asls(y_proc, lam=baseline_lam, p=baseline_p, niter=baseline_niter)
-        y_proc = y_proc - baseline_curve
-    elif baseline_method == 'airPLS':
-        baseline_curve = estimate_baseline_airpls(y_proc, lam=baseline_lam, niter=baseline_niter)
-        y_proc = y_proc - baseline_curve
-    elif baseline_method == 'arPLS':
-        baseline_curve = estimate_baseline_arpls(y_proc, lam=baseline_lam, niter=baseline_niter)
-        y_proc = y_proc - baseline_curve
-    elif baseline_method == 'IarPLS':
-        baseline_curve = estimate_baseline_iarpls(y_proc, lam=baseline_lam, niter=baseline_niter)
-        y_proc = y_proc - baseline_curve
-    if norm_method_pre == 'Max intensity':
-        mx = np.max(y_proc)
-        if mx > 0:
-            y_proc = y_proc / mx
-    elif norm_method_pre == 'AUC':
-        y_proc = auc_normalize(x, y_proc)
-    elif norm_method_pre == 'Vector':
-        y_proc = vector_normalize(x, y_proc)
-    return x, y, y_proc, baseline_curve
+        return hash(str(len(spectra_dict)))
 
 @st.fragment
 def render_combined_tab(cached, filtered_spectra, x_ranges):
@@ -2762,13 +2158,49 @@ def render_compare_tab(cached, filtered_spectra, ordered_spectra):
                 csv_diff = diff_df.to_csv(index=False)
                 st.download_button(
                     label="📥 Export Difference Data (CSV)",
-                    data=diff_csv if False else csv_diff,
+                    data=csv_diff,
                     file_name=f"difference_data_{name_a}_{name_b}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv"
                 )
             plt.close(fig)
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+@st.fragment
+def render_markers_plot_fragment(spectra, selected_offset_step, selected_fill,
+                                  selected_normalized, selected_use_offset, selected_yl,
+                                  cached, x_ranges, show_values, show_preview, is_region_mode):
+    fig_markers = create_spectral_markers_plot(
+        spectra, cached['x_label'], selected_yl,
+        selected_offset_step, selected_fill, selected_normalized,
+        selected_use_offset, x_ranges, cached['subtract_min_intensity'],
+        cached['fill_alpha'], cached['show_grid'], cached['line_width'],
+        cached['fig_width'], cached['fig_height'],
+        cached['legend_fontsize'], cached['legend_position'], cached['legend_offset'],
+        st.session_state.spectral_markers,
+        st.session_state.spectral_markers_preview_position,
+        st.session_state.spectral_markers_preview_width,
+        show_values,
+        is_region_mode,
+        show_preview
+    )
+    st.pyplot(fig_markers)
+    buf = BytesIO()
+    fig_markers.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+    buf.seek(0)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    st.markdown(f"""
+    <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+        <a href="data:image/png;base64,{b64}" download="spectral_markers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           color: white; border: none; border-radius: 8px; 
+                           padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                📥 Download Plot with Markers (PNG, 600 dpi)
+            </button>
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
+    plt.close(fig_markers)
 
 @st.fragment
 def render_markers_tab(cached, filtered_spectra):
@@ -3508,253 +2940,6 @@ def render_heatmap_tab(cached, filtered_spectra, ordered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-@st.fragment
-def render_curve_fitting_tab(cached, filtered_spectra, ordered_spectra):
-    st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
-    st.subheader("📈 Curve Fitting")
-    st.markdown("*Full iterative peak fitting with preprocessing — Voigt / Gaussian / Lorentzian / PseudoVoigt*")
-
-    if not ordered_spectra:
-        st.warning("No spectra loaded.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
-
-    st.markdown("### 📋 Step 1: Select Target Spectrum & Preprocessing")
-
-    target_name = st.selectbox(
-        "Select spectrum to fit",
-        options=ordered_spectra,
-        index=0,
-        key="fit_target_spectrum"
-    )
-    st.session_state.fitting_target_spectrum = target_name
-
-    target_data = filtered_spectra[target_name]['data']
-    x_full = target_data['x'].values.astype(np.float64)
-    y_full = target_data['y'].values.astype(np.float64)
-
-    st.markdown("#### 🧹 Preprocessing (optional)")
-    col1, col2 = st.columns(2)
-    with col1:
-        despike_enabled = st.checkbox("Despike (Whitaker-Hayes)", value=False, key="fit_despike_enabled")
-        despike_ma = 5
-        despike_thresh = 7.0
-        if despike_enabled:
-            despike_ma = st.slider("Despike kernel size", 1, 15, 5, key="fit_despike_ma")
-            despike_thresh = st.slider("Despike threshold (Z-score)", 2.0, 15.0, 7.0, 0.5, key="fit_despike_thresh")
-    with col2:
-        denoise_method = st.selectbox(
-            "Denoise method",
-            options=['None', 'SavGol', 'Gaussian'],
-            index=0, key="fit_denoise_method"
-        )
-        denoise_param = 9
-        denoise_param2 = 3
-        if denoise_method == 'SavGol':
-            denoise_param = st.slider("SavGol window length", 5, 31, 9, 2, key="fit_savgol_window")
-            denoise_param2 = st.slider("SavGol polyorder", 1, 7, 3, 1, key="fit_savgol_poly")
-            if denoise_param % 2 == 0:
-                denoise_param += 1
-        elif denoise_method == 'Gaussian':
-            denoise_param = st.slider("Gaussian sigma", 0.5, 10.0, 1.0, 0.5, key="fit_gauss_sigma")
-
-    st.markdown("#### 📉 Baseline Correction")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        baseline_method = st.selectbox(
-            "Baseline method",
-            options=['None', 'AsLS', 'airPLS', 'arPLS', 'IarPLS'],
-            index=0, key="fit_baseline_method"
-        )
-    with col2:
-        baseline_lam = st.number_input(
-            "Lambda (λ)", min_value=1e3, max_value=1e9, value=1000000.0,
-            step=100000.0, format="%.0f", key="fit_baseline_lam"
-        )
-    with col3:
-        baseline_p = st.slider("p (asymmetry, AsLS only)", 0.001, 0.1, 0.01, 0.001, key="fit_baseline_p")
-    baseline_niter = st.slider("Iterations (baseline)", 5, 50, 10, 1, key="fit_baseline_niter")
-
-    st.markdown("#### 📐 Post-Baseline Normalization")
-    norm_method_pre = st.selectbox(
-        "Normalization",
-        options=['None', 'Max intensity', 'AUC', 'Vector'],
-        index=0, key="fit_norm_method"
-    )
-
-    x_bytes = x_full.tobytes()
-    y_bytes = y_full.tobytes()
-
-    x_proc, y_orig, y_proc, baseline_curve = apply_preprocessing_cached(
-        x_bytes, y_bytes,
-        despike_enabled, despike_ma, despike_thresh,
-        denoise_method, denoise_param, denoise_param2,
-        baseline_method, baseline_lam, baseline_p, baseline_niter,
-        norm_method_pre
-    )
-
-    st.session_state.fitting_preprocessed = (x_proc, y_orig, y_proc, baseline_curve)
-
-    fig_pre, (ax_pre1, ax_pre2) = plt.subplots(2, 1, figsize=(12, 7), gridspec_kw={'height_ratios': [1, 1]})
-    ax_pre1.plot(x_proc, y_orig, color='gray', lw=1, label='Original', alpha=0.7)
-    if baseline_curve is not None:
-        ax_pre1.plot(x_proc, baseline_curve, color='red', lw=1.5, ls='--', label='Baseline')
-    ax_pre1.set_xlabel(cached['x_label'], fontsize=10, fontweight='bold')
-    ax_pre1.set_ylabel("Intensity (a.u.)", fontsize=10, fontweight='bold')
-    ax_pre1.set_title("Original Spectrum & Estimated Baseline", fontsize=11, fontweight='bold')
-    ax_pre1.legend(loc='best', fontsize=9)
-    ax_pre1.grid(True, alpha=0.3, linestyle='--')
-    ax_pre1.tick_params(direction='in', length=5, width=1)
-
-    ax_pre2.plot(x_proc, y_proc, color='black', lw=1.2, label='Preprocessed')
-    ax_pre2.set_xlabel(cached['x_label'], fontsize=10, fontweight='bold')
-    ax_pre2.set_ylabel("Intensity (a.u.)", fontsize=10, fontweight='bold')
-    ax_pre2.set_title("Preprocessed Spectrum (used for fitting)", fontsize=11, fontweight='bold')
-    ax_pre2.legend(loc='best', fontsize=9)
-    ax_pre2.grid(True, alpha=0.3, linestyle='--')
-    ax_pre2.tick_params(direction='in', length=5, width=1)
-    plt.tight_layout()
-    st.pyplot(fig_pre)
-    plt.close(fig_pre)
-
-    st.markdown("---")
-    st.markdown("### 📊 Step 2: Peak Detection & Fitting Parameters")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        peak_function = st.selectbox(
-            "Peak function",
-            options=['Voigt', 'Gaussian', 'Lorentzian', 'PseudoVoigt'],
-            index=0, key="fit_peak_function"
-        )
-        threshold_factor = st.slider("Detection threshold (fraction of max)", 0.001, 0.5, 0.05, 0.005, key="fit_threshold")
-        min_dist = st.slider("Min peak distance (points)", 1, 100, 2, 1, key="fit_min_dist")
-    with col2:
-        min_height_factor = st.slider("Min peak height (fraction of max)", 0.001, 0.5, 0.02, 0.005, key="fit_min_height")
-        prominence_factor = st.slider("Prominence (fraction of max)", 0.0, 0.5, 0.03, 0.005, key="fit_prominence")
-        reduce_factor = st.slider("Reduce data points (1 = no reduction)", 1, 10, 1, 1, key="fit_reduce_factor")
-    with col3:
-        max_iterations = st.slider("Max iterations (residual peaks)", 0, 10, 3, 1, key="fit_max_iterations")
-        center_vary = st.slider("Center vary (± cm⁻¹)", 0.5, 50.0, 5.0, 0.5, key="fit_center_vary")
-        min_height = st.slider("Min peak height (absolute)", 0.0, 100.0, 2.0, 0.5, key="fit_min_height_abs")
-
-    fit_method = st.selectbox(
-        "Fit method",
-        options=['leastsq', 'least_squares', 'nelder'],
-        index=0, key="fit_method_select"
-    )
-
-    if st.button("🚀 Run Fitting", use_container_width=True, key="run_fitting_btn"):
-        with st.spinner("Fitting in progress... this may take several seconds"):
-            y_proc_bytes = y_proc.astype(np.float64).tobytes()
-            result = fit_peaks_preprocessed(
-                x_bytes, y_proc_bytes,
-                peak_function=peak_function,
-                threshold_factor=threshold_factor,
-                min_dist=min_dist,
-                min_height_factor=min_height_factor,
-                prominence_factor=prominence_factor,
-                reduce_factor=reduce_factor,
-                max_iterations=max_iterations,
-                center_vary=center_vary,
-                min_height=min_height,
-                fit_method=fit_method
-            )
-            if result is not None:
-                st.session_state.fitting_results = {
-                    'result': result,
-                    'x': x_proc,
-                    'y': y_proc,
-                    'peak_function': peak_function
-                }
-                st.success("✅ Fitting complete!")
-            else:
-                st.session_state.fitting_results = None
-                st.error("❌ Fitting failed or no peaks found. Try adjusting detection parameters.")
-            st.rerun(scope="fragment")
-
-    if st.session_state.get('fitting_results') is not None:
-        fit_data = st.session_state.fitting_results
-        result = fit_data['result']
-        xs_fit = fit_data['x']
-        ys_fit = fit_data['y']
-        pf = fit_data['peak_function']
-
-        st.markdown("---")
-        st.markdown("### 📈 Step 3: Fitting Results")
-
-        metrics = calculate_fit_metrics(xs_fit, ys_fit, result)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            r2 = metrics['r_squared']
-            st.metric("R²", f"{r2:.5f}" if r2 is not None else "N/A")
-        with col2:
-            chi = metrics['chi_squared']
-            st.metric("χ² (SSR)", f"{chi:.4g}" if chi is not None else "N/A")
-        with col3:
-            rmse = metrics['rmse']
-            st.metric("RMSE", f"{rmse:.4g}" if rmse is not None else "N/A")
-
-        fig_fit = plot_fit_results(xs_fit, ys_fit, result,
-                                    title=f"Iterative {pf} Fitting — {target_name.replace('.txt', '')}",
-                                    show_components=True, show_residuals=True)
-        st.pyplot(fig_fit)
-        buf = BytesIO()
-        fig_fit.savefig(buf, format='png', dpi=600, bbox_inches='tight')
-        buf.seek(0)
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        st.markdown(f"""
-        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
-            <a href="data:image/png;base64,{b64}" download="fitting_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
-                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                               color: white; border: none; border-radius: 8px; 
-                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
-                    📥 Download Fitting Plot (PNG, 600 dpi)
-                </button>
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
-        plt.close(fig_fit)
-
-        params_df = extract_peak_params(result, peak_function=pf)
-        st.markdown("#### 📋 Fitted Peak Parameters")
-        if not params_df.empty:
-            st.dataframe(params_df, use_container_width=True, hide_index=True)
-            csv_fit = params_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Export Fit Parameters (CSV)",
-                data=csv_fit,
-                file_name=f"fit_parameters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No peak parameters available.")
-
-        components_data = []
-        try:
-            comps = result.eval_components(x=xs_fit)
-            for key, comp in comps.items():
-                area = np.trapz(comp, xs_fit)
-                components_data.append({
-                    'Component': key.replace('_', '').rstrip('p'),
-                    'Integrated Area': area
-                })
-        except Exception:
-            pass
-        if components_data:
-            st.markdown("#### 📊 Integrated Areas (per component)")
-            comp_df = pd.DataFrame(components_data)
-            st.dataframe(comp_df, use_container_width=True, hide_index=True)
-            csv_comp = comp_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Export Component Areas (CSV)",
-                data=csv_comp,
-                file_name=f"fit_areas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
 def main():
     import os
     from PIL import Image
@@ -4199,8 +3384,7 @@ def main():
             "Compare Two Spectra",
             "Spectral Markers",
             "3D Graphs",
-            "Heatmaps",
-            "Curve Fitting"
+            "Heatmaps"
         ]
 
         current_tab = st.session_state.active_tab
@@ -4234,8 +3418,6 @@ def main():
             render_3d_tab(cached, filtered_spectra, ordered_spectra)
         elif selected_tab == "Heatmaps":
             render_heatmap_tab(cached, filtered_spectra, ordered_spectra)
-        elif selected_tab == "Curve Fitting":
-            render_curve_fitting_tab(cached, filtered_spectra, ordered_spectra)
 
         st.markdown("---")
         st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -4309,7 +3491,6 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
 3D Graphs Created: {st.session_state.get('graph3d_created', False)}
 Gradient Colors Applied: {st.session_state.get('gradient_applied', False)}
 Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
-Curve Fitting Completed: {st.session_state.get('fitting_results') is not None}
 """
             st.download_button(
                 label="📄 Export Session Info",
@@ -4335,8 +3516,7 @@ Curve Fitting Completed: {st.session_state.get('fitting_results') is not None}
         7. **Add Markers** - Place vertical lines and regions to track spectral features
         8. **3D Visualization** - Explore spectra in 3D with surface and line plots
         9. **Heatmaps** - Generate heatmaps for temperature/concentration dependence
-        10. **Curve Fitting** - Full iterative Voigt/Gaussian/Lorentzian fitting with preprocessing
-        11. **Export Results** - Download processed data, plots, and analysis results
+        10. **Export Results** - Download processed data, plots, and analysis results
         """)
 
         st.markdown("### ✨ Key Features:")
@@ -4350,10 +3530,12 @@ Curve Fitting Completed: {st.session_state.get('fitting_results') is not None}
         - 🔥 **Heatmap Generation** - Visualize spectral evolution as function of temperature or concentration
         - 📏 **Spectral Markers** - Add vertical lines and regions to track peak positions across conditions
         - 🎲 **3D Visualization** - Surface and line plots for comprehensive spectral analysis
-        - 🧪 **Curve Fitting** - Iterative Voigt/Gaussian/Lorentzian/PseudoVoigt fitting with residual peak detection
-        - 🧹 **Preprocessing** - Despiking (Whitaker-Hayes), denoising (SavGol/Gaussian), baseline correction (AsLS/airPLS/arPLS/IarPLS)
-        - 📐 **Multiple Normalization Methods** - Maximum intensity, peak range, AUC, Vector
         - 💾 **Data Export** - Download processed data in CSV format with publication-ready plots
+        - 📐 **Multiple Normalization Methods** - Maximum intensity or custom peak range normalization
+        - 📏 **Cumulative Offset** - Add offsets to spectra for clear visualization (1st: 0, 2nd: +step, 3rd: +2×step)
+        - 🎛️ **Adjustable Transparency** - Control fill opacity from 0.2 to 0.9
+        - ⚙️ **Grid & Line Thickness** - Customize plot appearance
+        - 🎨 **Gradient Color Assignment** - Automatically assign colors using gradient palettes
         - ⚡ **Fragment Isolation** - Each tab runs independently for fast interactions
         """)
 
