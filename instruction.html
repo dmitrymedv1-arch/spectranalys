@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SpectrAnalys - Complete User Guide</title>
     <style>
-        /* ============================================
-                   RESET & BASE STYLES
-                   ============================================ */
         * {
             margin: 0;
             padding: 0;
@@ -22,9 +19,6 @@
             padding: 20px;
         }
 
-        /* ============================================
-                   CONTAINER
-                   ============================================ */
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -35,9 +29,6 @@
             overflow: hidden;
         }
 
-        /* ============================================
-                   HEADER WITH LOGO
-                   ============================================ */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 40px;
@@ -126,9 +117,6 @@
             z-index: 1;
         }
 
-        /* ============================================
-                   TABLE OF CONTENTS
-                   ============================================ */
         .toc {
             background: #f8f9fa;
             border-radius: 12px;
@@ -194,9 +182,11 @@
             color: #721c24;
         }
 
-        /* ============================================
-                   SECTION HEADERS
-                   ============================================ */
+        .badge-new {
+            background: #fff3cd;
+            color: #856404;
+        }
+
         .section {
             margin-bottom: 50px;
         }
@@ -243,15 +233,17 @@
             color: #721c24;
         }
 
+        .section-badge-new {
+            background: #fff3cd;
+            color: #856404;
+        }
+
         .section-description {
             color: #6c757d;
             font-size: 16px;
             margin-bottom: 25px;
         }
 
-        /* ============================================
-                   STEP CARDS
-                   ============================================ */
         .step-card {
             background: white;
             border-radius: 12px;
@@ -280,6 +272,11 @@
         .step-card.advanced {
             border-left: 4px solid #dc3545;
             background: #fff8f9;
+        }
+
+        .step-card.new {
+            border-left: 4px solid #ffc107;
+            background: #fffdf5;
         }
 
         .step-header {
@@ -316,6 +313,11 @@
             background: #dc3545;
         }
 
+        .step-card.new .step-number {
+            background: #ffc107;
+            color: #2c3e50;
+        }
+
         .step-title {
             font-size: 18px;
             font-weight: 600;
@@ -345,6 +347,11 @@
         .step-badge-advanced {
             background: #f8d7da;
             color: #721c24;
+        }
+
+        .step-badge-new {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .step-toggle {
@@ -429,9 +436,15 @@
             font-weight: 600;
         }
 
-        /* ============================================
-                   FEATURE GRID
-                   ============================================ */
+        .step-body pre {
+            background: #f1f3f5;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 13px;
+            overflow-x: auto;
+        }
+
         .feature-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -470,9 +483,6 @@
             color: #6c757d;
         }
 
-        /* ============================================
-                   TIPS & TRICKS SECTION
-                   ============================================ */
         .tips-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -499,9 +509,6 @@
             color: #6c757d;
         }
 
-        /* ============================================
-                   TROUBLESHOOTING TABLE
-                   ============================================ */
         .troubleshoot-table {
             width: 100%;
             border-collapse: collapse;
@@ -530,9 +537,6 @@
             background: #e9ecef;
         }
 
-        /* ============================================
-                   FOOTER
-                   ============================================ */
         .footer {
             margin-top: 50px;
             padding-top: 30px;
@@ -553,9 +557,6 @@
             color: #adb5bd;
         }
 
-        /* ============================================
-                   BACK TO TOP
-                   ============================================ */
         .back-to-top {
             position: fixed;
             bottom: 30px;
@@ -585,9 +586,6 @@
             display: flex;
         }
 
-        /* ============================================
-                   RESPONSIVE
-                   ============================================ */
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
@@ -662,9 +660,6 @@
             }
         }
 
-        /* ============================================
-                   UTILITY CLASSES
-                   ============================================ */
         .text-center {
             text-align: center;
         }
@@ -695,31 +690,19 @@
 </head>
 <body>
 
-    <!-- ============================================
-    BACK TO TOP BUTTON
-    ============================================ -->
     <button class="back-to-top" id="backToTop" aria-label="Back to top">↑</button>
 
-    <!-- ============================================
-    MAIN CONTAINER
-    ============================================ -->
     <div class="container">
 
-        <!-- ============================================
-        HEADER
-        ============================================ -->
         <header class="header">
             <div style="display: flex; justify-content: center; margin-bottom: 10px;">
                 <img src="data:image/png;base64,{logo_base64}" style="height: 120px; width: auto; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.2));" alt="SpectrAnalys Logo">
             </div>
             <div class="header-subtitle">Advanced Spectroscopic Data Analysis Platform</div>
-            <div class="header-tagline">High-Precision Peak Detection · Correlation Analysis · Heatmap Generation</div>
-            <span class="header-version">📌 Version 2.0</span>
+            <div class="header-tagline">Preprocessing · Peak Detection · Voigt Fitting · Correlation Analysis · Heatmap Generation</div>
+            <span class="header-version">📌 Version 2.1</span>
         </header>
 
-        <!-- ============================================
-        TABLE OF CONTENTS
-        ============================================ -->
         <div class="toc">
             <h2>📑 Table of Contents</h2>
             <div class="toc-grid">
@@ -740,39 +723,45 @@
                     <span class="badge badge-optional">Optional</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-peakanalysis">5. Peak Analysis</a>
+                    <a href="#section-preprocessing">5. Preprocessing</a>
+                    <span class="badge badge-new">New</span>
+                </div>
+                <div class="toc-item">
+                    <a href="#section-voigt">6. Voigt Fitting</a>
+                    <span class="badge badge-new">New</span>
+                </div>
+                <div class="toc-item">
+                    <a href="#section-peakanalysis">7. Peak Analysis</a>
                     <span class="badge badge-advanced">Advanced</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-correlation">6. Parameter Correlation</a>
+                    <a href="#section-correlation">8. Parameter Correlation</a>
                     <span class="badge badge-advanced">Advanced</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-comparison">7. Compare Two Spectra</a>
+                    <a href="#section-comparison">9. Compare Two Spectra</a>
                     <span class="badge badge-advanced">Advanced</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-heatmap">8. Heatmap Generation</a>
+                    <a href="#section-heatmap">10. Heatmap Generation</a>
                     <span class="badge badge-advanced">Advanced</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-markers">9. Spectral Markers</a>
+                    <a href="#section-markers">11. Spectral Markers</a>
                     <span class="badge badge-optional">Optional</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-dataexport">10. Data Export</a>
+                    <a href="#section-dataexport">12. Data Export</a>
                     <span class="badge badge-required">Required</span>
                 </div>
                 <div class="toc-item">
-                    <a href="#section-troubleshooting">11. Troubleshooting</a>
+                    <a href="#section-troubleshooting">13. Troubleshooting</a>
                     <span class="badge badge-optional">Help</span>
                 </div>
             </div>
         </div>
 
-        <!-- ============================================
-        SECTION 1: QUICK START
-        ============================================ -->
+        <!-- SECTION 1 -->
         <section class="section" id="section-quickstart">
             <div class="section-header">
                 <span class="icon">🚀</span>
@@ -783,7 +772,6 @@
                 Follow these essential steps to get started with SpectrAnalys. These steps are required to load and visualize your spectra.
             </p>
 
-            <!-- Step 1.1 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">1</span>
@@ -800,7 +788,7 @@
                     </ul>
                     <div class="note">
                         <strong>💡 Note:</strong> Files must be in <code>.txt</code> format with the structure shown below:
-                        <pre style="background:#f1f3f5;padding:10px;border-radius:6px;margin-top:8px;font-size:13px;">
+                        <pre>
 100.5    1250.3
 101.2    1248.7
 102.0    1251.5
@@ -810,7 +798,6 @@
                 </div>
             </div>
 
-            <!-- Step 1.2 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">2</span>
@@ -831,7 +818,6 @@
                 </div>
             </div>
 
-            <!-- Step 1.3 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">3</span>
@@ -853,28 +839,27 @@
                 </div>
             </div>
 
-            <!-- Step 1.4 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">4</span>
-                    <span class="step-title">Configure Axis Labels &amp; Normalization</span>
+                    <span class="step-title">Configure Axis Labels, Preprocessing &amp; Normalization</span>
                     <span class="step-badge step-badge-required">Required</span>
                     <span class="step-toggle">▼</span>
                 </div>
                 <div class="step-body">
-                    <p>Under <strong>"Processing Options"</strong>, set up your axis labels and normalization method.</p>
+                    <p>Under <strong>"Processing Options"</strong>, set up axis labels and, if needed, enable preprocessing and normalization.</p>
                     <ul>
                         <li><strong>X‑axis label:</strong> Typically <code>Raman shift (cm⁻¹)</code></li>
                         <li><strong>Y‑axis label:</strong> Typically <code>Intensity (a.u.)</code></li>
+                        <li><strong>Preprocessing (new):</strong> Optional despike, denoise, and baseline correction — applied automatically before normalization. See <a href="#section-preprocessing">Section 5</a>.</li>
                         <li><strong>Normalization:</strong> Choose from <code>Maximum intensity</code>, <code>Peak intensity (range)</code>, or <code>Maximum rest intensity</code></li>
                     </ul>
                     <div class="tip">
-                        <strong>💡 Tip:</strong> If you have a reference peak, use <strong>"Peak intensity (range)"</strong> and specify the peak region for consistent normalization.
+                        <strong>💡 Tip:</strong> If the spectra have strong fluorescence background, enable <strong>Baseline correction</strong> with the <strong>Raman</strong> preset before normalization.
                     </div>
                 </div>
             </div>
 
-            <!-- Step 1.5 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">5</span>
@@ -897,7 +882,6 @@
                 </div>
             </div>
 
-            <!-- Step 1.6 -->
             <div class="step-card required">
                 <div class="step-header" onclick="toggleStep(this)">
                     <span class="step-number">6</span>
@@ -913,15 +897,13 @@
                         <li><strong>Download:</strong> Click <strong>"Download Plot"</strong> below each plot for high‑resolution PNG (600 dpi)</li>
                     </ul>
                     <div class="tip">
-                        <strong>💡 Tip:</strong> Use the <strong>zoom tool</strong> (magnifying glass icon) to inspect specific regions of your spectra.
+                        <strong>💡 Tip:</strong> New tabs <strong>Preprocessing</strong> and <strong>Voigt Fitting</strong> are available in the top navigation. See Sections <a href="#section-preprocessing">5</a> and <a href="#section-voigt">6</a>.
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 2: SPECTRA VISUALIZATION
-        ============================================ -->
+        <!-- SECTION 2 -->
         <section class="section" id="section-visualization">
             <div class="section-header">
                 <span class="icon">📊</span>
@@ -936,7 +918,7 @@
                 <div class="feature-item">
                     <div class="icon">📈</div>
                     <h4>Raw Spectra</h4>
-                    <p>Original intensity values without any normalization. Best for checking raw data quality.</p>
+                    <p>Original intensity values (after preprocessing, if enabled). Best for checking raw data quality.</p>
                 </div>
                 <div class="feature-item">
                     <div class="icon">📊</div>
@@ -974,11 +956,29 @@
                     </ul>
                 </div>
             </div>
+
+            <div class="step-card optional">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">🎨</span>
+                    <span class="step-title">Gradient Color Assignment</span>
+                    <span class="step-badge step-badge-optional">Optional</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Automatically assign colors to all spectra using a gradient palette.</p>
+                    <ul>
+                        <li>Select a palette (Reds_r, RdBu_r, turbo, Spectral, viridis, plasma, etc.)</li>
+                        <li>Click <strong>"Apply gradient colors"</strong> to assign colors based on the ordering of spectra</li>
+                        <li>Individual colors can still be fine‑tuned afterwards in the <strong>Color Assignment</strong> section</li>
+                    </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> Gradient palettes are excellent for temperature or concentration series where sequential coloring makes trends visible.
+                    </div>
+                </div>
+            </div>
         </section>
 
-        <!-- ============================================
-        SECTION 3: NORMALIZATION
-        ============================================ -->
+        <!-- SECTION 3 -->
         <section class="section" id="section-normalization">
             <div class="section-header">
                 <span class="icon">📐</span>
@@ -1050,9 +1050,7 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 4: X-AXIS RANGES
-        ============================================ -->
+        <!-- SECTION 4 -->
         <section class="section" id="section-xranges">
             <div class="section-header">
                 <span class="icon">📈</span>
@@ -1122,17 +1120,324 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 5: PEAK ANALYSIS
-        ============================================ -->
+        <!-- SECTION 5: PREPROCESSING (NEW) -->
+        <section class="section" id="section-preprocessing">
+            <div class="section-header">
+                <span class="icon">🧹</span>
+                <h2>5. Preprocessing (New)</h2>
+                <span class="section-badge section-badge-new">New</span>
+            </div>
+            <p class="section-description">
+                Preprocessing is a global layer applied to all spectra <strong>before normalization</strong> and before any visualization or analysis. All changes are applied automatically as you adjust parameters — no Apply button is required.
+            </p>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">1</span>
+                    <span class="step-title">Where to find it</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>In the sidebar, under <strong>"Processing Options"</strong>, expand the <strong>🧹 Preprocessing</strong> section. It contains three independent blocks:</p>
+                    <ul>
+                        <li><strong>Despike (Whitaker–Hayes)</strong> — removes cosmic-ray spikes</li>
+                        <li><strong>Denoise</strong> — SavGol / Gaussian / Whittaker / Kernel smoothing</li>
+                        <li><strong>Baseline correction</strong> — 14 methods from <code>pybaselines</code></li>
+                    </ul>
+                    <div class="note">
+                        <strong>💡 Note:</strong> Each block has its own enable checkbox. If all are disabled, spectra pass through unchanged (identical to the old behavior).
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">2</span>
+                    <span class="step-title">Despike (Whitaker–Hayes)</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Removes narrow spikes (cosmic rays) without affecting real peaks.</p>
+                    <ul>
+                        <li><strong>Kernel size:</strong> 1–15 — neighborhood size for the local median</li>
+                        <li><strong>Threshold:</strong> 1.0–30.0 — modified z-score threshold (higher = less aggressive)</li>
+                    </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> Start with defaults (kernel 3, threshold 8). If real peaks are being altered, increase the threshold to 10–12.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">3</span>
+                    <span class="step-title">Denoise</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Smoothing to reduce random noise. Choose one method:</p>
+                    <ul>
+                        <li><strong>SavGol:</strong> Polynomial smoothing. Parameters: <code>window_length</code> (odd, 3–51), <code>polyorder</code> (1–7). Best general-purpose choice.</li>
+                        <li><strong>Gaussian:</strong> Gaussian blur. Parameter: <code>sigma</code> (0.1–10). Best for very noisy spectra.</li>
+                        <li><strong>Whittaker:</strong> Penalized least squares. Parameter: <code>lambda</code> (1–1e10). Best for preserving peak shape.</li>
+                        <li><strong>Kernel:</strong> Moving average with flat/hanning/hamming/bartlett/blackman window. Parameters: <code>kernel_type</code>, <code>kernel_size</code> (odd, 3–51).</li>
+                    </ul>
+                    <div class="warning">
+                        <strong>⚠️ Warning:</strong> Too large a window or sigma will broaden and flatten real peaks. Reduce if peak shapes look distorted.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">4</span>
+                    <span class="step-title">Baseline Correction (14 methods)</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Removes fluorescence background and slow baseline drift. Powered by <code>pybaselines</code>.</p>
+                    <p><strong>Available methods:</strong></p>
+                    <ul>
+                        <li><strong>AsLS, IAsLS, airPLS, arPLS, drPLS, IarPLS, asPLS</strong> — penalized least-squares family (best for Raman)</li>
+                        <li><strong>Poly, ModPoly, IModPoly, Goldindec</strong> — polynomial fitting</li>
+                        <li><strong>IRSQR, CornerCutting, FABC</strong> — spline / classification based</li>
+                    </ul>
+                    <p><strong>Presets (fill in lambda/p/diff_order/poly_order):</strong></p>
+                    <ul>
+                        <li><strong>Raman</strong> — lam=1e5, p=1e-2, diff_order=2 (default, best for typical Raman)</li>
+                        <li><strong>Fluorescence</strong> — lam=1e6, p=1e-3, diff_order=2 (stronger background)</li>
+                        <li><strong>Polynomial</strong> — poly_order=3 (smooth broad background)</li>
+                        <li><strong>Aggressive</strong> — lam=1e7, p=1e-4, diff_order=3 (very strong correction)</li>
+                    </ul>
+                    <p><strong>Manual parameters:</strong></p>
+                    <ul>
+                        <li><code>lambda</code> — smoothness (higher = smoother baseline)</li>
+                        <li><code>p</code> — asymmetry (smaller = baseline stays below peaks)</li>
+                        <li><code>diff_order</code> — derivative order (2 or 3)</li>
+                        <li><code>poly_order</code> — polynomial degree for Poly-family</li>
+                        <li><code>max_iter</code>, <code>tol</code> — iteration limits</li>
+                    </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> Start with the <strong>Raman</strong> preset and <strong>asPLS</strong>. If residual background remains, increase <code>lambda</code> by 10× and/or decrease <code>p</code> by 10×.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">5</span>
+                    <span class="step-title">Show removed baseline (diagnostics)</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Enable <strong>"Show removed baseline on plots"</strong> to overlay the subtracted baseline on the Combined Spectra Visualization tab.</p>
+                    <ul>
+                        <li>Baseline is drawn as a dotted line in the spectrum's color</li>
+                        <li>Only shown on the raw plots (not normalized)</li>
+                        <li>Purely diagnostic — does not affect computations</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">6</span>
+                    <span class="step-title">Pipeline order and dependencies</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p><strong>Order of operations:</strong></p>
+                    <ol>
+                        <li>Raw data loaded</li>
+                        <li><strong>Despike</strong> (if enabled)</li>
+                        <li><strong>Denoise</strong> (if enabled)</li>
+                        <li><strong>Baseline correction</strong> (if enabled)</li>
+                        <li>Align X ranges (if <strong>"Align all spectra to common x range"</strong> is checked)</li>
+                        <li>Normalization (see Section 3)</li>
+                        <li>Visualization / analysis</li>
+                    </ol>
+                    <div class="note">
+                        <strong>💡 Note:</strong> Preprocessing is applied <strong>before</strong> normalization and <strong>before</strong> alignment. This ensures baseline correction sees the original x‑grid.
+                    </div>
+                    <div class="warning">
+                        <strong>⚠️ Requires:</strong> <code>pybaselines</code> (install via <code>pip install pybaselines</code>). Despike and denoise use only <code>scipy</code>, which is already a dependency.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 6: VOIGT FITTING (NEW) -->
+        <section class="section" id="section-voigt">
+            <div class="section-header">
+                <span class="icon">🧪</span>
+                <h2>6. Voigt Fitting (New)</h2>
+                <span class="section-badge section-badge-new">New</span>
+            </div>
+            <p class="section-description">
+                Decompose a single spectrum into individual peak components using Voigt, PseudoVoigt, Gaussian, or Lorentzian profiles. This is the full fitting module — each spectrum is fit individually, not in batch.
+            </p>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">1</span>
+                    <span class="step-title">Select spectrum and data mode</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Open the <strong>"Voigt Fitting"</strong> tab from the top navigation.</p>
+                    <ul>
+                        <li><strong>Select spectrum to fit:</strong> dropdown with all loaded spectra</li>
+                        <li><strong>Data mode:</strong>
+                            <ul>
+                                <li><strong>Raw (after preprocessing)</strong> — uses <code>y</code> after preprocessing, without normalization</li>
+                                <li><strong>Normalized (global norm_method)</strong> — uses the global normalization from the sidebar</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <div class="note">
+                        <strong>💡 Note:</strong> Preprocessing is always applied (it is a global layer). The mode only controls whether <code>normalize_spectrum</code> is applied on top.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">2</span>
+                    <span class="step-title">Configure fit parameters (no computation yet)</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Changing any parameter <strong>does not</strong> trigger computation — values are only stored in a draft state.</p>
+                    <ul>
+                        <li><strong>Profile type:</strong> Voigt (default, most physical) / PseudoVoigt (faster) / Gaussian / Lorentzian</li>
+                        <li><strong>Peak detection threshold:</strong> minimum peak height for initial detection</li>
+                        <li><strong>Minimum peak height:</strong> peaks with lower height are removed after each iteration</li>
+                        <li><strong>Min distance between peaks:</strong> minimum distance in points</li>
+                        <li><strong>Prominence:</strong> 0 = auto; increase to skip broad shoulders</li>
+                        <li><strong>Center variation (±):</strong> how much a peak center may shift during fit</li>
+                        <li><strong>Max residual-add iterations:</strong> how many rounds of residual peak detection to run (0–20)</li>
+                        <li><strong>Reduce data points factor:</strong> 0 = no reduction; &gt;1 speeds up fitting on large spectra</li>
+                        <li><strong>Fit method:</strong> <code>leastsq</code> (fast, default), <code>least_squares</code> (more robust), <code>nelder</code></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">3</span>
+                    <span class="step-title">Fit range and baseline component</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p><strong>Fit range:</strong></p>
+                    <ul>
+                        <li><strong>Use global x_ranges from sidebar</strong> — reuses the ranges from Processing Options</li>
+                        <li>Otherwise, set a local <strong>left</strong> and <strong>right</strong> slider specific to this fit</li>
+                    </ul>
+                    <p><strong>Baseline component (optional):</strong></p>
+                    <ul>
+                        <li><strong>Constant</strong> — adds a constant offset to the model</li>
+                        <li><strong>Linear</strong> — adds a linear trend</li>
+                        <li><strong>Polynomial</strong> — adds a polynomial of degree 1–10</li>
+                    </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> Use a baseline component only if the preprocessing baseline did not fully remove the background in the fitted region. Otherwise, leave it off — fewer parameters fit better.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">4</span>
+                    <span class="step-title">Apply Fit</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Click <strong>"🚀 Apply Fit"</strong> to run the fit on the selected spectrum only.</p>
+                    <ul>
+                        <li>A progress bar shows residual-add iterations</li>
+                        <li>Result is stored in session state and displayed below</li>
+                        <li><strong>Clear Result</strong> removes the stored result without changing parameters</li>
+                    </ul>
+                    <div class="warning">
+                        <strong>⚠️ Note:</strong> Changing the spectrum or data mode after fitting keeps the old result visible with a notice. Press <strong>Apply Fit</strong> again to recompute, or <strong>Clear Result</strong> to reset.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">5</span>
+                    <span class="step-title">Interpret results</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>The results panel shows:</p>
+                    <ul>
+                        <li><strong>Plot:</strong> data, total fit (dashed red), individual components, baseline component (dotted gray), residuals panel below</li>
+                        <li><strong>Component parameters table:</strong>
+                            <ul>
+                                <li><strong>Center</strong> (± error) — peak position in X units</li>
+                                <li><strong>Height</strong> (± error) — peak maximum</li>
+                                <li><strong>FWHM</strong> (± error) — full width at half maximum</li>
+                                <li><strong>Area</strong> (± error) — integrated intensity (amplitude)</li>
+                                <li><strong>Sigma</strong> — Gaussian width</li>
+                                <li><strong>Gamma</strong> — Lorentzian width</li>
+                                <li><strong>Lorentz_frac</strong> — fraction of Lorentzian character (Voigt only)</li>
+                            </ul>
+                        </li>
+                        <li><strong>Quality metrics:</strong> Reduced χ², χ², R², AIC, BIC, N points, number of varying parameters, DOF, fit range</li>
+                        <li><strong>Fit log:</strong> full <code>lmfit</code> report in expander (if Verbose is enabled)</li>
+                    </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> If reduced χ² does not decrease when adding more components, the extra components are likely fitting noise. Lower <strong>Max residual-add iterations</strong> or raise <strong>Minimum peak height</strong>.
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-card new">
+                <div class="step-header" onclick="toggleStep(this)">
+                    <span class="step-number">6</span>
+                    <span class="step-title">Export</span>
+                    <span class="step-badge step-badge-new">New</span>
+                    <span class="step-toggle">▼</span>
+                </div>
+                <div class="step-body">
+                    <p>Two export buttons:</p>
+                    <ul>
+                        <li><strong>📥 Download Components (CSV)</strong> — table of all components with parameters and errors</li>
+                        <li><strong>📥 Download Fit Plot (PNG, 600 dpi)</strong> — publication-ready figure</li>
+                    </ul>
+                    <div class="note">
+                        <strong>💡 Note:</strong> Each export includes a timestamp in the filename for version tracking.
+                    </div>
+                    <div class="warning">
+                        <strong>⚠️ Requires:</strong> <code>lmfit</code> (install via <code>pip install lmfit</code>).
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 7 -->
         <section class="section" id="section-peakanalysis">
             <div class="section-header">
                 <span class="icon">🔍</span>
-                <h2>5. Advanced Peak Analysis</h2>
+                <h2>7. Advanced Peak Analysis</h2>
                 <span class="section-badge section-badge-advanced">Advanced</span>
             </div>
             <p class="section-description">
-                Automatically detect and characterize peaks within a user‑selected X‑range. This module provides quantitative data for each peak.
+                Automatically detect and characterize peaks within a user‑selected X‑range. This module provides quantitative data for each peak, across all selected spectra.
             </p>
 
             <div class="step-card advanced">
@@ -1209,17 +1514,18 @@
                         <li>Includes all peaks with their calculated parameters</li>
                         <li>Respects the <strong>Include</strong> checkbox state</li>
                     </ul>
+                    <div class="tip">
+                        <strong>💡 Tip:</strong> For full peak decomposition with Voigt profiles, use the <strong>Voigt Fitting</strong> tab (Section 6) — it gives fit errors and a complete fit report.
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 6: PARAMETER CORRELATION
-        ============================================ -->
+        <!-- SECTION 8 -->
         <section class="section" id="section-correlation">
             <div class="section-header">
                 <span class="icon">📈</span>
-                <h2>6. Parameter Correlation</h2>
+                <h2>8. Parameter Correlation</h2>
                 <span class="section-badge section-badge-advanced">Advanced</span>
             </div>
             <p class="section-description">
@@ -1252,7 +1558,7 @@
                 <div class="step-body">
                     <p>Correlation requires peak data:</p>
                     <ul>
-                        <li>First run <strong>Peak Analysis</strong> (Tab 2)</li>
+                        <li>First run <strong>Peak Analysis</strong> (Section 7)</li>
                         <li>Check the peaks you want to include</li>
                         <li>Correlation uses the most intense included peak from each spectrum</li>
                     </ul>
@@ -1289,13 +1595,11 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 7: COMPARE TWO SPECTRA
-        ============================================ -->
+        <!-- SECTION 9 -->
         <section class="section" id="section-comparison">
             <div class="section-header">
                 <span class="icon">🔀</span>
-                <h2>7. Compare Two Spectra</h2>
+                <h2>9. Compare Two Spectra</h2>
                 <span class="section-badge section-badge-advanced">Advanced</span>
             </div>
             <p class="section-description">
@@ -1364,13 +1668,11 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 8: HEATMAP GENERATION
-        ============================================ -->
+        <!-- SECTION 10 -->
         <section class="section" id="section-heatmap">
             <div class="section-header">
                 <span class="icon">🔥</span>
-                <h2>8. Heatmap Generation</h2>
+                <h2>10. Heatmap Generation</h2>
                 <span class="section-badge section-badge-advanced">Advanced</span>
             </div>
             <p class="section-description">
@@ -1385,11 +1687,11 @@
                     <span class="step-toggle">▼</span>
                 </div>
                 <div class="step-body">
-                    <p>In the sidebar, under <strong>"Heatmap Parameters"</strong>:</p>
+                    <p>In the <strong>"Heatmaps"</strong> tab:</p>
                     <ul>
                         <li>Select <strong>Parameter type</strong> (Temperature, Concentration, or Custom)</li>
                         <li>Enter a numeric value for each spectrum</li>
-                        <li><strong>NEW:</strong> Check <strong>"Assign as the file name"</strong> to automatically extract numbers from filenames</li>
+                        <li>Check <strong>"Assign as the file name"</strong> to automatically extract numbers from filenames</li>
                     </ul>
                     <div class="tip">
                         <strong>💡 Tip:</strong> Name your files like <code>0.05.txt</code>, <code>100.txt</code>, or <code>temp_25.txt</code> and use the auto‑extract feature!
@@ -1444,13 +1746,11 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 9: SPECTRAL MARKERS
-        ============================================ -->
+        <!-- SECTION 11 -->
         <section class="section" id="section-markers">
             <div class="section-header">
                 <span class="icon">📏</span>
-                <h2>9. Spectral Markers</h2>
+                <h2>11. Spectral Markers</h2>
                 <span class="section-badge section-badge-optional">Optional</span>
             </div>
             <p class="section-description">
@@ -1522,13 +1822,11 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 10: DATA EXPORT
-        ============================================ -->
+        <!-- SECTION 12 -->
         <section class="section" id="section-dataexport">
             <div class="section-header">
                 <span class="icon">📤</span>
-                <h2>10. Data Export</h2>
+                <h2>12. Data Export</h2>
                 <span class="section-badge section-badge-required">Required</span>
             </div>
             <p class="section-description">
@@ -1539,7 +1837,7 @@
                 <div class="feature-item">
                     <div class="icon">📊</div>
                     <h4>Raw Data (CSV)</h4>
-                    <p>Original X‑Y data for all spectra. Each spectrum has its own columns.</p>
+                    <p>Preprocessed X‑Y data for all spectra. Each spectrum has its own columns.</p>
                 </div>
                 <div class="feature-item">
                     <div class="icon">📈</div>
@@ -1549,7 +1847,7 @@
                 <div class="feature-item">
                     <div class="icon">📝</div>
                     <h4>Session Info (TXT)</h4>
-                    <p>Complete parameters: normalization, offsets, ranges, and settings.</p>
+                    <p>Complete parameters: preprocessing, normalization, offsets, ranges, and settings.</p>
                 </div>
                 <div class="feature-item">
                     <div class="icon">🖼️</div>
@@ -1568,13 +1866,14 @@
                 <div class="step-body">
                     <p><strong>Export from the bottom of the main interface:</strong></p>
                     <ul>
-                        <li><strong>Raw Data:</strong> All original spectra with X‑Y columns</li>
+                        <li><strong>Raw Data:</strong> Preprocessed spectra with X‑Y columns</li>
                         <li><strong>Normalized Data:</strong> Normalized spectra with X‑Y columns</li>
-                        <li><strong>Session Info:</strong> Complete parameter record for reproducibility</li>
+                        <li><strong>Session Info:</strong> Complete parameter record (includes preprocessing state and Voigt fit presence)</li>
                         <li><strong>Individual Plots:</strong> Each plot has a download button below it</li>
                         <li><strong>Peak Analysis:</strong> CSV with all detected peaks and parameters</li>
                         <li><strong>Correlation Data:</strong> CSV with parameter vs spectral features</li>
                         <li><strong>Difference Data:</strong> X‑Y data for the difference profile</li>
+                        <li><strong>Voigt Fitting:</strong> CSV of components + PNG of fit plot</li>
                     </ul>
                     <div class="tip">
                         <strong>💡 Tip:</strong> All exported files include a timestamp in the filename for version tracking.
@@ -1583,13 +1882,11 @@
             </div>
         </section>
 
-        <!-- ============================================
-        SECTION 11: TROUBLESHOOTING
-        ============================================ -->
+        <!-- SECTION 13 -->
         <section class="section" id="section-troubleshooting">
             <div class="section-header">
                 <span class="icon">🔧</span>
-                <h2>11. Troubleshooting</h2>
+                <h2>13. Troubleshooting</h2>
                 <span class="section-badge section-badge-optional">Help</span>
             </div>
             <p class="section-description">
@@ -1618,7 +1915,7 @@
                     <tr>
                         <td><strong>Heatmap shows no data</strong></td>
                         <td>Values not assigned or "Apply" not clicked</td>
-                        <td>Assign parameter values in sidebar and click "Apply for heatmaps".</td>
+                        <td>Assign parameter values in the Heatmaps tab and click "Apply for heatmaps".</td>
                     </tr>
                     <tr>
                         <td><strong>Normalized spectra look identical</strong></td>
@@ -1645,6 +1942,46 @@
                         <td>Browser cache or session state issue</td>
                         <td>Refresh the page (F5). Settings are preserved in session state.</td>
                     </tr>
+                    <tr>
+                        <td><strong>Baseline correction removes real peaks</strong></td>
+                        <td>lambda too high or p too low</td>
+                        <td>Lower lambda by 10× and/or increase p (try 1e-1). Use the <strong>Raman</strong> preset as a starting point. Enable "Show removed baseline" to verify.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Baseline correction leaves residual background</strong></td>
+                        <td>lambda too low or p too high</td>
+                        <td>Increase lambda by 10× and/or lower p (try 1e-3). Consider the <strong>Aggressive</strong> preset.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Denoise distorts peak shapes</strong></td>
+                        <td>Window or sigma too large</td>
+                        <td>Reduce window_length (SavGol) or sigma (Gaussian). Prefer SavGol with polyorder 2–3 and window 7–11.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Voigt fit finds too many components</strong></td>
+                        <td>Min height too low or iterations too high</td>
+                        <td>Increase Minimum peak height, reduce Max residual-add iterations (try 1–2), or enable a baseline component.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Voigt fit finds too few components</strong></td>
+                        <td>Threshold too high or peaks below threshold</td>
+                        <td>Lower Peak detection threshold, lower Minimum peak height, increase Max iterations.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Voigt fit does not converge / very slow</strong></td>
+                        <td>Too many peaks, noisy data, or too many points</td>
+                        <td>Set <code>Reduce data points factor</code> (e.g., 2–5), use <code>least_squares</code>, reduce Max iterations, or narrow the fit range.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ModuleNotFoundError: pybaselines / lmfit</strong></td>
+                        <td>Dependencies not installed</td>
+                        <td>Run <code>pip install pybaselines lmfit</code> and restart Streamlit.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Voigt Fitting tab shows old result</strong></td>
+                        <td>Result belongs to a different spectrum or mode</td>
+                        <td>Click <strong>Clear Result</strong> or press <strong>Apply Fit</strong> again after switching spectrum/mode.</td>
+                    </tr>
                 </tbody>
             </table>
 
@@ -1658,21 +1995,20 @@
                 <div class="step-body">
                     <ul>
                         <li><strong>Start simple:</strong> Begin with 2‑3 spectra to understand the workflow</li>
-                        <li><strong>Use naming conventions:</strong> Name files with numeric values for auto‑extraction</li>
+                        <li><strong>Preprocessing first:</strong> Enable baseline correction before fitting Voigt profiles — the fit will be far more reliable</li>
+                        <li><strong>Use naming conventions:</strong> Name files with numeric values for auto‑extraction in heatmaps and 3D graphs</li>
                         <li><strong>Save frequently:</strong> Export your data and plots regularly</li>
                         <li><strong>Check logs:</strong> Error messages appear in the interface when something goes wrong</li>
                         <li><strong>Reset if stuck:</strong> Use "Remove all spectra" to start fresh</li>
+                        <li><strong>Diagnose baseline:</strong> Enable "Show removed baseline" to verify the baseline does not eat real peaks</li>
                     </ul>
                 </div>
             </div>
         </section>
 
-        <!-- ============================================
-        FOOTER
-        ============================================ -->
         <footer class="footer">
             <p>
-                <span class="version">SpectrAnalys v2.0</span>
+                <span class="version">SpectrAnalys v2.1</span>
                 &nbsp;·&nbsp; Advanced Spectroscopic Data Analysis Platform
             </p>
             <p class="copyright">
@@ -1682,13 +2018,7 @@
 
     </div>
 
-    <!-- ============================================
-    JAVASCRIPT: INTERACTIVE TOGGLES & BACK TO TOP
-    ============================================ -->
     <script>
-        // ============================================
-        // Toggle step body visibility
-        // ============================================
         function toggleStep(headerElement) {
             const card = headerElement.closest('.step-card');
             const body = card.querySelector('.step-body');
@@ -1705,9 +2035,6 @@
             }
         }
 
-        // ============================================
-        // Back to Top button
-        // ============================================
         const backToTopBtn = document.getElementById('backToTop');
 
         window.addEventListener('scroll', function() {
@@ -1725,9 +2052,6 @@
             });
         });
 
-        // ============================================
-        // Smooth scroll for anchor links
-        // ============================================
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -1742,9 +2066,6 @@
             });
         });
 
-        // ============================================
-        // Auto-expand first step in each section
-        // ============================================
         document.addEventListener('DOMContentLoaded', function() {
             const sections = document.querySelectorAll('.section');
             sections.forEach(section => {
@@ -1761,9 +2082,6 @@
             });
         });
 
-        // ============================================
-        // Keyboard shortcut: Escape to collapse all
-        // ============================================
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 const openBodies = document.querySelectorAll('.step-body.open');
@@ -1782,4 +2100,3 @@
 
 </body>
 </html>
- 
