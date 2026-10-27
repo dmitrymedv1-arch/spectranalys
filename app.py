@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 from scipy.integrate import simpson
 from io import StringIO, BytesIO
 import re
@@ -18,6 +18,12 @@ from matplotlib import cm
 from matplotlib.ticker import LinearLocator
 import matplotlib.colors as mcolors
 from matplotlib.collections import PolyCollection
+from scipy.special import wofz
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
+import pybaselines
+from lmfit import Parameters
+from lmfit.models import VoigtModel, ConstantModel, LinearModel, PolynomialModel
 
 st.set_page_config(
     page_title="SpectrAnalys",
@@ -128,6 +134,57 @@ if 'peak_enabled' not in st.session_state:
     st.session_state.peak_enabled = False
 if 'correlation_enabled' not in st.session_state:
     st.session_state.correlation_enabled = False
+
+if 'preprocessing_params' not in st.session_state:
+    st.session_state.preprocessing_params = {
+        'despike_enabled': False,
+        'despike_kernel_size': 3,
+        'despike_threshold': 8.0,
+        'denoise_enabled': False,
+        'denoise_method': 'SavGol',
+        'denoise_window_length': 9,
+        'denoise_polyorder': 3,
+        'denoise_sigma': 1.0,
+        'denoise_lam': 1e3,
+        'denoise_kernel_type': 'hanning',
+        'denoise_kernel_size': 11,
+        'baseline_enabled': False,
+        'baseline_method': 'asPLS',
+        'baseline_preset': 'Raman',
+        'baseline_lam': 1e5,
+        'baseline_p': 1e-2,
+        'baseline_diff_order': 2,
+        'baseline_poly_order': 3,
+        'baseline_max_iter': 50,
+        'baseline_tol': 1e-3,
+        'show_baseline': False,
+    }
+
+if 'voigt_fit_draft' not in st.session_state:
+    st.session_state.voigt_fit_draft = {
+        'spectrum_name': None,
+        'mode': 'Raw (after preprocessing)',
+        'profile_type': 'Voigt',
+        'threshold': 0.25,
+        'min_height': 2.0,
+        'min_dist': 2,
+        'prominence': None,
+        'center_vary': 5.0,
+        'max_iterations': 5,
+        'reduce_data_points_factor': None,
+        'fit_method': 'leastsq',
+        'use_global_x_ranges': False,
+        'fit_range_left': None,
+        'fit_range_right': None,
+        'add_baseline_component': False,
+        'baseline_component_type': 'Constant',
+        'baseline_poly_order': 1,
+        'verbose': True,
+    }
+if 'voigt_fit_result' not in st.session_state:
+    st.session_state.voigt_fit_result = None
+if 'voigt_fit_result_for' not in st.session_state:
+    st.session_state.voigt_fit_result_for = None
 
 def load_instruction_html():
     try:
@@ -410,11 +467,634 @@ def gradient_fill(ax, x, y, color, offset=0):
             ax.fill_between(x[j:j+2], offset, y_level[j:j+2],
                            color=color, alpha=0.03, linewidth=0)
 
+# ============================ PREPROCESSING ============================
+
+def _whitaker_hayes_modified_z_score(spectrum):
+    mad_term = np.median([np.abs(spectrum - np.median(spectrum))])
+    if mad_term == 0:
+        return np.zeros_like(spectrum)
+    return np.array(0.6745 * (spectrum - np.median(spectrum)) / mad_term)
+
+
+def _whitaker_hayes_spectrum(intensity_values_array, kernel_size, threshold):
+    import copy
+    spectrum_array = copy.deepcopy(intensity_values_array)
+    if len(spectrum_array) < 2:
+        return spectrum_array
+    spikes = np.abs(_whitaker_hayes_modified_z_score(np.diff(spectrum_array))) > threshold
+    if len(spikes) == 0 or not np.any(spikes):
+        return spectrum_array
+    spikes = np.concatenate([spikes, [False]])
+    guard = 0
+    while any(spikes) and guard < 1000:
+        guard += 1
+        changes = False
+        for i in range(len(spikes)):
+            if spikes[i]:
+                neighbours = np.arange(max(0, i - kernel_size),
+                                       min(len(spectrum_array) - 1, i + 1 + kernel_size))
+                valid = neighbours[spikes[neighbours] == 0]
+                if len(valid) == 0:
+                    continue
+                fixed_value = np.mean(spectrum_array[valid])
+                if np.isnan(fixed_value):
+                    continue
+                spectrum_array[i] = fixed_value
+                spikes[i] = False
+                changes = True
+        if not changes:
+            break
+    return spectrum_array
+
+
+def despike_whitaker_hayes(y, kernel_size=3, threshold=8.0):
+    y = np.asarray(y, dtype=float)
+    if len(y) < 3:
+        return y
+    return _whitaker_hayes_spectrum(y, int(kernel_size), float(threshold))
+
+
+def denoise_spectrum(y, params):
+    from scipy.signal import savgol_filter
+    from scipy.ndimage import gaussian_filter
+    y = np.asarray(y, dtype=float)
+    method = params.get('denoise_method', 'SavGol')
+    try:
+        if method == 'SavGol':
+            wl = int(params.get('denoise_window_length', 9))
+            po = int(params.get('denoise_polyorder', 3))
+            if wl % 2 == 0:
+                wl += 1
+            if wl <= po:
+                wl = po + 1 if (po + 1) % 2 == 1 else po + 2
+            if wl >= len(y):
+                wl = len(y) - 1 if len(y) % 2 == 0 else len(y)
+                if wl % 2 == 0:
+                    wl -= 1
+            if wl < 3:
+                return y
+            return savgol_filter(y, window_length=wl, polyorder=min(po, wl - 1))
+        elif method == 'Gaussian':
+            return gaussian_filter(y, sigma=float(params.get('denoise_sigma', 1.0)))
+        elif method == 'Whittaker':
+            lam = float(params.get('denoise_lam', 1e3))
+            d = 2
+            I = np.eye(len(y))
+            D = np.diff(I, d).T
+            return (y @ np.linalg.inv(I + lam * D.T @ D).T)
+        elif method == 'Kernel':
+            ktype = params.get('denoise_kernel_type', 'hanning')
+            ksize = int(params.get('denoise_kernel_size', 11))
+            if ksize % 2 == 0:
+                ksize += 1
+            if ksize >= len(y):
+                return y
+            padded = np.r_[y[ksize - 1:0:-1], y, y[-2:-ksize - 1:-1]]
+            if ktype == 'flat':
+                window = np.ones(ksize, 'd')
+            else:
+                window = getattr(np, ktype)(ksize)
+            smoothed = np.convolve(window / window.sum(), padded, mode='valid')
+            return smoothed[int(ksize / 2):-int(ksize / 2)]
+        else:
+            return y
+    except Exception:
+        return y
+
+
+_BASELINE_METHODS = {
+    'AsLS': pybaselines.whittaker.asls,
+    'IAsLS': pybaselines.whittaker.iasls,
+    'airPLS': pybaselines.whittaker.airpls,
+    'arPLS': pybaselines.whittaker.arpls,
+    'drPLS': pybaselines.whittaker.drpls,
+    'IarPLS': pybaselines.whittaker.iarpls,
+    'asPLS': pybaselines.whittaker.aspls,
+    'Poly': pybaselines.polynomial.poly,
+    'ModPoly': pybaselines.polynomial.modpoly,
+    'IModPoly': pybaselines.polynomial.imodpoly,
+    'Goldindec': pybaselines.polynomial.goldindec,
+    'IRSQR': pybaselines.spline.irsqr,
+    'CornerCutting': pybaselines.spline.corner_cutting,
+    'FABC': pybaselines.classification.fabc,
+}
+
+
+def _baseline_kwargs(method, params):
+    d = int(params.get('baseline_diff_order', 2))
+    lam = float(params.get('baseline_lam', 1e5))
+    p = float(params.get('baseline_p', 1e-2))
+    poly_order = int(params.get('baseline_poly_order', 3))
+    max_iter = int(params.get('baseline_max_iter', 50))
+    tol = float(params.get('baseline_tol', 1e-3))
+    if method in ('AsLS', 'IAsLS', 'airPLS', 'arPLS', 'drPLS', 'IarPLS', 'asPLS'):
+        kw = {'lam': lam, 'max_iter': max_iter, 'tol': tol}
+        if method in ('AsLS', 'IAsLS'):
+            kw['p'] = p
+        if method in ('AsLS', 'IAsLS', 'airPLS', 'arPLS', 'drPLS', 'IarPLS', 'asPLS'):
+            kw['diff_order'] = d
+        return kw
+    if method in ('Poly', 'ModPoly', 'IModPoly', 'Goldindec'):
+        kw = {'poly_order': poly_order, 'max_iter': max_iter, 'tol': tol}
+        return kw
+    if method == 'IRSQR':
+        return {'lam': lam, 'max_iter': max_iter, 'tol': 1e-6}
+    if method == 'CornerCutting':
+        return {'max_iter': max_iter}
+    if method == 'FABC':
+        return {'lam': lam, 'diff_order': d}
+    return {}
+
+
+def baseline_correct_spectrum(x, y, params):
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    method = params.get('baseline_method', 'asPLS')
+    if method not in _BASELINE_METHODS:
+        return y, np.zeros_like(y)
+    try:
+        func = _BASELINE_METHODS[method]
+        kwargs = _baseline_kwargs(method, params)
+        out = func(y, x_data=x, **kwargs)
+        baseline = out[0] if isinstance(out, tuple) else out
+        baseline = np.asarray(baseline, dtype=float)
+        corrected = y - baseline
+        return corrected, baseline
+    except Exception:
+        try:
+            func = _BASELINE_METHODS[method]
+            kwargs = _baseline_kwargs(method, params)
+            out = func(y, **kwargs)
+            baseline = out[0] if isinstance(out, tuple) else out
+            baseline = np.asarray(baseline, dtype=float)
+            return y - baseline, baseline
+        except Exception:
+            return y, np.zeros_like(y)
+
+
+@st.cache_data
+def preprocess_spectra_cached(x_bytes, y_bytes, params_items):
+    x = np.frombuffer(x_bytes, dtype=np.float64)
+    y = np.frombuffer(y_bytes, dtype=np.float64)
+    params = dict(params_items)
+    y_out = y.copy()
+    baseline_removed = None
+    if params.get('despike_enabled', False):
+        y_out = despike_whitaker_hayes(y_out,
+                                       kernel_size=params.get('despike_kernel_size', 3),
+                                       threshold=params.get('despike_threshold', 8.0))
+    if params.get('denoise_enabled', False):
+        y_out = denoise_spectrum(y_out, params)
+    if params.get('baseline_enabled', False):
+        y_out, baseline_removed = baseline_correct_spectrum(x, y_out, params)
+    return y_out, baseline_removed
+
+
+def preprocess_spectra(spectra_dict, params):
+    out = {}
+    params_items = tuple(sorted((k, v) for k, v in params.items() if not isinstance(v, (list, dict))))
+    for name, spec in spectra_dict.items():
+        data = spec['data']
+        x = data['x'].values.astype(np.float64)
+        y = data['y'].values.astype(np.float64)
+        mask = np.isfinite(x) & np.isfinite(y)
+        if not np.all(mask):
+            x = x[mask]
+            y = y[mask]
+        if len(x) == 0:
+            out[name] = spec
+            continue
+        try:
+            y_out, baseline_removed = preprocess_spectra_cached(x.tobytes(), y.tobytes(), params_items)
+        except Exception:
+            y_out = y.copy()
+            baseline_removed = None
+        new_spec = {
+            'data': pd.DataFrame({'x': x, 'y': y_out}),
+            'color': spec['color'],
+        }
+        if baseline_removed is not None:
+            new_spec['baseline_removed'] = baseline_removed
+        out[name] = new_spec
+    return out
+
+# ============================ VOIGT FITTING ============================
+
+def voigt_amplitude_from_height(height, sigma, gamma):
+    denom = np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
+    if denom == 0:
+        return 0.0
+    return height * sigma * np.sqrt(2 * np.pi) / denom
+
+
+def voigt_height(amplitude, sigma, gamma):
+    if sigma == 0:
+        return 0.0
+    return (amplitude / (sigma * np.sqrt(2 * np.pi))) * \
+           np.real(wofz((1j * gamma) / (sigma * np.sqrt(2))))
+
+
+def voigt_fwhm_components(sigma, gamma):
+    fg = 2 * np.sqrt(2 * np.log(2)) * sigma
+    fl = 2 * gamma
+    return 0.5346 * fl + np.sqrt(0.2166 * fl**2 + fg**2)
+
+
+def lorentz_fraction(sigma, gamma):
+    fg = 2 * np.sqrt(2 * np.log(2)) * sigma
+    fl = 2 * gamma
+    if fg + fl == 0:
+        return 0.0
+    return fl / (fg + fl)
+
+
+def _voigt_model_factory(profile_type, prefix):
+    if profile_type == 'Voigt':
+        return VoigtModel(prefix=prefix)
+    from lmfit.models import PseudoVoigtModel, GaussianModel, LorentzianModel
+    if profile_type == 'PseudoVoigt':
+        return PseudoVoigtModel(prefix=prefix)
+    if profile_type == 'Gaussian':
+        return GaussianModel(prefix=prefix)
+    if profile_type == 'Lorentzian':
+        return LorentzianModel(prefix=prefix)
+    return VoigtModel(prefix=prefix)
+
+
+def _set_peak_params(pars, profile_type, prefix, pos, height, sigma_guess, gamma_guess,
+                     min_sigma, min_gamma, max_amplitude, max_sigma, max_gamma,
+                     min_height, center_vary):
+    if profile_type == 'Voigt':
+        amplitude_guess = voigt_amplitude_from_height(height, sigma_guess, gamma_guess)
+        min_amplitude = voigt_amplitude_from_height(min_height, sigma_guess, gamma_guess)
+        amplitude_guess = np.clip(amplitude_guess, min_amplitude, max_amplitude)
+        pars[prefix + 'amplitude'].set(value=amplitude_guess, min=min_amplitude, max=max_amplitude, vary=True)
+        pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+        pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma, max=max_sigma, vary=True)
+        pars[prefix + 'gamma'].set(value=gamma_guess, min=min_gamma, max=max_gamma, vary=True)
+    else:
+        fwhm_guess = 2 * np.sqrt(2 * np.log(2)) * sigma_guess if profile_type == 'Gaussian' else 2 * gamma_guess
+        if profile_type == 'PseudoVoigt':
+            fwhm_guess = 2 * np.sqrt(2 * np.log(2)) * sigma_guess
+            amplitude_guess = height * fwhm_guess * 1.0
+            pars[prefix + 'amplitude'].set(value=amplitude_guess, min=0, max=max_amplitude, vary=True)
+            pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma, max=max_sigma, vary=True)
+            if prefix + 'fraction' in pars:
+                pars[prefix + 'fraction'].set(value=0.5, min=0.0, max=1.0, vary=True)
+        elif profile_type == 'Gaussian':
+            pars[prefix + 'amplitude'].set(value=height * fwhm_guess * 0.5, min=0, max=max_amplitude, vary=True)
+            pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+            pars[prefix + 'sigma'].set(value=sigma_guess, min=min_sigma, max=max_sigma, vary=True)
+        elif profile_type == 'Lorentzian':
+            pars[prefix + 'amplitude'].set(value=height * fwhm_guess * 0.5, min=0, max=max_amplitude, vary=True)
+            pars[prefix + 'center'].set(value=pos, min=pos - center_vary, max=pos + center_vary, vary=True)
+            pars[prefix + 'sigma'].set(value=gamma_guess, min=min_gamma, max=max_gamma, vary=True)
+
+
+def create_residual_models_voigt(indices, xs, residuals, iteration, max_amplitude,
+                                  max_sigma, max_gamma, center_vary, min_height,
+                                  profile_type='Voigt'):
+    model = None
+    params = Parameters()
+    min_sigma = 1e-6
+    min_gamma = 1e-6
+    try:
+        widths, width_heights, left_ips, right_ips = peak_widths(residuals, indices, rel_height=0.5)
+    except Exception:
+        widths = np.ones(len(indices))
+    dx = np.diff(xs).mean() if len(xs) > 1 else 1.0
+    fwhms = np.abs(widths) * dx
+    for idx, fwhm in zip(indices, fwhms):
+        pos = xs[idx]
+        height = residuals[idx]
+        if height <= 0:
+            continue
+        if fwhm <= 0:
+            fwhm = dx * 5
+        sigma_guess = fwhm / (2 * np.sqrt(2 * np.log(2)))
+        gamma_guess = fwhm / 2
+        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
+        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
+        prefix = f'iter{iteration}_p{idx}_'
+        voigt = _voigt_model_factory(profile_type, prefix)
+        pars = voigt.make_params()
+        _set_peak_params(pars, profile_type, prefix, pos, height, sigma_guess, gamma_guess,
+                         min_sigma, min_gamma, max_amplitude, max_sigma, max_gamma,
+                         min_height, center_vary)
+        if model is None:
+            model = voigt
+        else:
+            model += voigt
+        params.update(pars)
+    return model, params
+
+
+def _add_baseline_component(model, params, xs, ys, baseline_type, poly_order):
+    if baseline_type == 'Constant':
+        bm = ConstantModel(prefix='base_')
+        bp = bm.make_params(c=np.median(ys))
+    elif baseline_type == 'Linear':
+        bm = LinearModel(prefix='base_')
+        bp = bm.make_params(slope=0.0, intercept=np.median(ys))
+    elif baseline_type == 'Polynomial':
+        bm = PolynomialModel(degree=int(poly_order), prefix='base_')
+        bp = bm.make_params()
+        for i in range(int(poly_order) + 1):
+            key = f'base_c{i}'
+            if key in bp:
+                bp[key].set(value=0.0 if i > 0 else np.median(ys))
+    else:
+        return model, params
+    if model is None:
+        model = bm
+    else:
+        model = model + bm
+    params.update(bp)
+    return model, params
+
+
+def fit_voigts_single(xs, ys, params_dict, progress_callback=None, verbose=False):
+    threshold = float(params_dict.get('threshold', 0.25))
+    min_dist = int(params_dict.get('min_dist', 2))
+    min_height = float(params_dict.get('min_height', 2.0))
+    prominence = params_dict.get('prominence', None)
+    if prominence is not None and (prominence <= 0):
+        prominence = None
+    reduce_factor = params_dict.get('reduce_data_points_factor', None)
+    max_iterations = int(params_dict.get('max_iterations', 5))
+    center_vary = float(params_dict.get('center_vary', 5.0))
+    fit_method = params_dict.get('fit_method', 'leastsq')
+    profile_type = params_dict.get('profile_type', 'Voigt')
+    add_baseline_component = bool(params_dict.get('add_baseline_component', False))
+    baseline_component_type = params_dict.get('baseline_component_type', 'Constant')
+    baseline_poly_order = int(params_dict.get('baseline_poly_order', 1))
+
+    if reduce_factor is not None and int(reduce_factor) > 1:
+        rf = int(reduce_factor)
+        xs_fit = xs[::rf]
+        ys_fit = ys[::rf]
+    else:
+        xs_fit = xs
+        ys_fit = ys
+
+    if len(xs_fit) < 5:
+        return None, "Not enough data points for fitting."
+
+    try:
+        peak_indices, properties = find_peaks(
+            ys_fit, height=threshold, distance=min_dist, prominence=prominence)
+    except Exception as e:
+        return None, f"Peak detection failed: {e}"
+
+    num_peaks = len(peak_indices)
+    if num_peaks == 0:
+        return None, "No peaks detected with the given threshold."
+
+    peak_positions = xs_fit[peak_indices]
+    peak_heights = ys_fit[peak_indices]
+
+    try:
+        widths, width_heights, left_ips, right_ips = peak_widths(ys_fit, peak_indices, rel_height=0.5)
+    except Exception:
+        widths = np.ones(len(peak_indices)) * 5
+    dx = np.diff(xs_fit).mean()
+    fwhms = np.abs(widths) * dx
+    sigmas = fwhms / (2 * np.sqrt(2 * np.log(2)))
+    gammas = fwhms / 2
+
+    min_sigma = 1e-6
+    min_gamma = 1e-6
+    max_amplitude = ys_fit.max() * np.pi * (xs_fit.max() - xs_fit.min()) / 2
+    max_sigma = (xs_fit.max() - xs_fit.min()) / 10
+    max_gamma = (xs_fit.max() - xs_fit.min()) / 10
+
+    model = None
+    params = Parameters()
+
+    for i in range(num_peaks):
+        prefix = f'p{i}_'
+        voigt = _voigt_model_factory(profile_type, prefix)
+        pars = voigt.make_params()
+        sigma_guess = sigmas[i] if len(sigmas) > i else (xs_fit.max() - xs_fit.min()) / 50
+        gamma_guess = gammas[i] if len(gammas) > i else (xs_fit.max() - xs_fit.min()) / 50
+        sigma_guess = np.clip(sigma_guess, min_sigma, max_sigma)
+        gamma_guess = np.clip(gamma_guess, min_gamma, max_gamma)
+        _set_peak_params(pars, profile_type, prefix, peak_positions[i], peak_heights[i],
+                         sigma_guess, gamma_guess, min_sigma, min_gamma,
+                         max_amplitude, max_sigma, max_gamma, min_height, center_vary)
+        if model is None:
+            model = voigt
+        else:
+            model += voigt
+        params.update(pars)
+
+    if add_baseline_component:
+        model, params = _add_baseline_component(model, params, xs_fit, ys_fit,
+                                                baseline_component_type, baseline_poly_order)
+
+    try:
+        final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+    except Exception as e:
+        return None, f"Initial fit failed: {e}"
+
+    params = final_result.params.copy()
+
+    def _remove_negligible_peaks(res, prms):
+        negligible = []
+        for param_name in res.params:
+            if param_name.endswith('amplitude') and not param_name.startswith('base_'):
+                prefix = param_name[:-len('amplitude')]
+                if prefix.startswith('iter') or prefix.startswith('p'):
+                    try:
+                        amplitude = res.params[param_name].value
+                        if prefix + 'sigma' in res.params:
+                            sigma = res.params[prefix + 'sigma'].value
+                        else:
+                            sigma = 1e-6
+                        if prefix + 'gamma' in res.params:
+                            gamma = res.params[prefix + 'gamma'].value
+                            h = voigt_height(amplitude, sigma, gamma)
+                        else:
+                            h = amplitude
+                        if h < min_height * 1.1:
+                            negligible.append(prefix)
+                    except Exception:
+                        continue
+        if not negligible:
+            return res, prms, None
+        for pre in negligible:
+            for par in list(prms.keys()):
+                if par.startswith(pre):
+                    try:
+                        del prms[par]
+                    except KeyError:
+                        pass
+        return res, prms, negligible
+
+    final_result, params, _ = _remove_negligible_peaks(final_result, params)
+
+    iteration = 0
+    while iteration < max_iterations:
+        residuals = ys_fit - final_result.best_fit
+        try:
+            residual_peak_indices, _ = find_peaks(
+                residuals, height=threshold, distance=min_dist, prominence=prominence)
+        except Exception:
+            residual_peak_indices = np.array([])
+        if len(residual_peak_indices) == 0:
+            break
+
+        new_model, new_params = create_residual_models_voigt(
+            residual_peak_indices, xs_fit, residuals, iteration + 1,
+            max_amplitude, max_sigma, max_gamma, center_vary, min_height,
+            profile_type=profile_type)
+        if new_model is None:
+            break
+
+        try:
+            model = model + new_model
+        except Exception:
+            break
+        params.update(new_params)
+        params.update(final_result.params)
+
+        try:
+            final_result = model.fit(ys_fit, params, x=xs_fit, method=fit_method)
+        except Exception as e:
+            break
+        params = final_result.params.copy()
+        final_result, params, _ = _remove_negligible_peaks(final_result, params)
+        if progress_callback is not None:
+            progress_callback(iteration + 1, max_iterations)
+        iteration += 1
+
+    return final_result, None
+
+
+def _extract_components_table(result, profile_type, xs_fit, ys_fit):
+    comps = []
+    if result is None:
+        return pd.DataFrame()
+    params = result.params
+    prefixes = set()
+    for name in params:
+        for suffix in ['amplitude', 'center', 'sigma', 'gamma', 'fwhm', 'height', 'fraction']:
+            if name.endswith(suffix) and not name.startswith('base_'):
+                prefixes.add(name[:-len(suffix)])
+    for prefix in sorted(prefixes):
+        try:
+            center = params[prefix + 'center'].value
+            center_err = params[prefix + 'center'].stderr if params[prefix + 'center'].stderr else np.nan
+            amplitude = params[prefix + 'amplitude'].value if prefix + 'amplitude' in params else np.nan
+            amplitude_err = params[prefix + 'amplitude'].stderr if prefix + 'amplitude' in params and params[prefix + 'amplitude'].stderr else np.nan
+            sigma = params[prefix + 'sigma'].value if prefix + 'sigma' in params else np.nan
+            gamma = params[prefix + 'gamma'].value if prefix + 'gamma' in params else np.nan
+            fwhm = np.nan
+            height = np.nan
+            lf = np.nan
+            if prefix + 'fwhm' in params:
+                fwhm = params[prefix + 'fwhm'].value
+                fwhm_err = params[prefix + 'fwhm'].stderr if params[prefix + 'fwhm'].stderr else np.nan
+            else:
+                if profile_type == 'Voigt' and not (np.isnan(sigma) or np.isnan(gamma)):
+                    fwhm = voigt_fwhm_components(sigma, gamma)
+                    fwhm_err = np.nan
+                elif not np.isnan(sigma):
+                    fwhm = 2 * np.sqrt(2 * np.log(2)) * sigma
+                    fwhm_err = np.nan
+                else:
+                    fwhm_err = np.nan
+            if prefix + 'height' in params:
+                height = params[prefix + 'height'].value
+                height_err = params[prefix + 'height'].stderr if params[prefix + 'height'].stderr else np.nan
+            else:
+                if profile_type == 'Voigt' and not (np.isnan(amplitude) or np.isnan(sigma) or np.isnan(gamma)):
+                    height = voigt_height(amplitude, sigma, gamma)
+                    height_err = np.nan
+                elif not np.isnan(amplitude) and not np.isnan(sigma):
+                    height = amplitude / (sigma * np.sqrt(2 * np.pi))
+                    height_err = np.nan
+                else:
+                    height_err = np.nan
+            if profile_type == 'Voigt' and not (np.isnan(sigma) or np.isnan(gamma)):
+                lf = lorentz_fraction(sigma, gamma)
+            area = np.nan
+            if not np.isnan(amplitude):
+                area = amplitude
+            comps.append({
+                'Component': prefix.rstrip('_'),
+                'Center': center,
+                'Center_err': center_err,
+                'Height': height,
+                'Height_err': height_err,
+                'FWHM': fwhm,
+                'FWHM_err': fwhm_err,
+                'Area': area,
+                'Area_err': amplitude_err,
+                'Sigma': sigma,
+                'Gamma': gamma,
+                'Lorentz_frac': lf,
+            })
+        except Exception:
+            continue
+    df = pd.DataFrame(comps)
+    if not df.empty:
+        df = df.sort_values('Center').reset_index(drop=True)
+    return df
+
+
+def plot_fit_results_streamlit(xs, ys, result, title, components_df, residuals=True):
+    if residuals:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8),
+                                       gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    else:
+        fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
+        ax2 = None
+
+    ax1.plot(xs, ys, lw=1, label='Data', color='black')
+    ax1.plot(xs, result.best_fit, label='Fitted', color='red', lw=1.5, ls='--')
+    comps = result.eval_components()
+    for key in comps:
+        if key.startswith('base_'):
+            continue
+        ax1.plot(xs, comps[key], ls='-', alpha=0.6, lw=1)
+    if 'base_' in ''.join(comps.keys()):
+        total_baseline = np.zeros_like(xs)
+        for key in comps:
+            if key.startswith('base_'):
+                total_baseline += comps[key]
+        ax1.plot(xs, total_baseline, ls=':', color='gray', lw=1.5, label='Baseline component')
+    if not components_df.empty:
+        for _, row in components_df.iterrows():
+            ax1.axvline(row['Center'], color='green', linestyle=':', alpha=0.4, lw=0.8)
+    ax1.set_ylabel("Intensity (a.u.)", fontsize=11, fontweight='bold')
+    ax1.set_title(title, fontsize=12, fontweight='bold')
+    ax1.legend(loc='best', fontsize=9)
+    ax1.tick_params(direction='in', length=5, width=1)
+    ax1.grid(True, alpha=0.3, linestyle='--')
+
+    if residuals and ax2 is not None:
+        res = ys - result.best_fit
+        ax2.plot(xs, res, label='Residuals', color='blue', lw=1)
+        ax2.axhline(0, color='black', linestyle='--', lw=0.8)
+        ax2.set_xlabel("Raman shift (cm⁻¹)", fontsize=11, fontweight='bold')
+        ax2.set_ylabel("Residuals", fontsize=11, fontweight='bold')
+        ax2.tick_params(direction='in', length=5, width=1)
+        ax2.grid(True, alpha=0.3, linestyle='--')
+    else:
+        ax1.set_xlabel("Raman shift (cm⁻¹)", fontsize=11, fontweight='bold')
+    plt.tight_layout()
+    return fig
+
+# ============================ PLOTS ============================
+
 def create_individual_plot(spectra_dict, x_label, y_label, title,
                            offset_step, fill_area, normalized, use_offset,
                            x_ranges, subtract_min_intensity, fill_alpha,
                            show_grid, line_width, fig_width, fig_height,
-                           legend_fontsize=8, legend_position="right", legend_offset=1.02):
+                           legend_fontsize=8, legend_position="right", legend_offset=1.02,
+                           show_baseline=False):
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     handles = []
     labels = []
@@ -447,6 +1127,10 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
             else:
                 line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name)
+            if show_baseline and 'baseline_removed' in spec:
+                br = spec['baseline_removed']
+                if br is not None and len(br) == len(x):
+                    ax.plot(x, br + offset, color=color, linewidth=0.8, linestyle=':', alpha=0.6)
             handles.append(line_handle[0])
             labels.append(display_name)
         ax.set_xlabel(x_label, fontsize=10, fontweight='bold')
@@ -476,6 +1160,11 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
                     line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
                 else:
                     line_handle = ax.plot(x, y_plot, color=color, linewidth=line_width, label=display_name if range_idx == 0 else "")
+                if show_baseline and 'baseline_removed' in spec:
+                    br = spec['baseline_removed']
+                    if br is not None and len(br) == len(x_full):
+                        br_crop = br[mask]
+                        ax.plot(x, br_crop + offset, color=color, linewidth=0.8, linestyle=':', alpha=0.6)
                 if range_idx == 0:
                     handles.append(line_handle[0])
                     labels.append(display_name)
@@ -530,6 +1219,7 @@ def create_individual_plot(spectra_dict, x_label, y_label, title,
         plt.tight_layout()
 
     return fig
+
 
 def create_combined_plot(spectra_dict, x_label, y_label, title,
                          raw_offset_step, norm_offset_step, fill_area,
@@ -664,6 +1354,7 @@ def create_combined_plot(spectra_dict, x_label, y_label, title,
         plt.subplots_adjust(top=0.95, hspace=0.4)
     return fig
 
+
 def calculate_fwhm(x, y, peak_idx):
     peak_y = y[peak_idx]
     half_max = peak_y / 2
@@ -691,6 +1382,7 @@ def calculate_fwhm(x, y, peak_idx):
             x_right = x[-1]
     fwhm = x_right - x_left
     return max(fwhm, 0)
+
 
 @st.cache_data
 def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_data_pickle):
@@ -727,6 +1419,7 @@ def analyze_peaks_manual_range_cached(spectra_key, x_range, peak_width, spectra_
             })
     return pd.DataFrame(results) if results else pd.DataFrame()
 
+
 def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
     results = []
     for name, spec in spectra_dict.items():
@@ -760,6 +1453,7 @@ def analyze_peaks_manual_range(spectra_dict, x_range, peak_width=20):
             })
     return pd.DataFrame(results) if results else pd.DataFrame()
 
+
 def create_peak_visualization(spectra_dict, x_range, peaks_df):
     fig, ax = plt.subplots(figsize=(12, 6))
     included_peaks = peaks_df[peaks_df['Include'] == True]
@@ -791,6 +1485,7 @@ def create_peak_visualization(spectra_dict, x_range, peaks_df):
     ax.grid(True, alpha=0.3, linestyle='--')
     plt.tight_layout()
     return fig
+
 
 def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
                            x_label, y_label, norm_method, norm_range,
@@ -952,6 +1647,7 @@ def create_comparison_plot(spectrum_a_data, spectrum_b_data, name_a, name_b,
 
     return fig, (mean_diff, max_abs_diff, rms_diff, correlation)
 
+
 def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
                    colorbar_label, colormap, interpolation, title,
                    fig_width=10, fig_height=8, log_scale=False, show_grid=True):
@@ -1020,6 +1716,7 @@ def create_heatmap(spectra_matrix, x_grid, y_values, x_label, y_label,
         ax.grid(False)
     plt.tight_layout()
     return fig
+
 
 @st.cache_data
 def prepare_heatmap_data_cached(spectra_names, spectra_hash, spectra_data_pickle, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
@@ -1094,6 +1791,7 @@ def prepare_heatmap_data_cached(spectra_names, spectra_hash, spectra_data_pickle
         return None, None, None, None
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
 
+
 def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_method, norm_range, x_ranges):
     all_x = []
     for name in ordered_spectra:
@@ -1166,6 +1864,7 @@ def prepare_heatmap_data(spectra_dict, ordered_spectra, heatmap_params, norm_met
     if not spectra_matrix:
         return None, None, None, None
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values)
+
 
 @st.fragment
 def marker_controls_fragment(global_min_x, global_max_x):
@@ -1260,6 +1959,7 @@ def marker_controls_fragment(global_min_x, global_max_x):
                     st.session_state.spectral_markers_preview_width = 0
                     st.session_state.pending_marker_index = None
                     st.rerun(scope="fragment")
+
 
 def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
                                   fill_area, normalized, use_offset, x_ranges,
@@ -1443,6 +2143,7 @@ def create_spectral_markers_plot(spectra_dict, x_label, y_label, offset_step,
 
     return fig
 
+
 @st.cache_data
 def prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, subtract_min_intensity):
     normalized_spectra = {}
@@ -1464,6 +2165,7 @@ def prepare_marker_spectra(filtered_spectra, norm_method, norm_range, x_ranges, 
             else:
                 normalized_spectra[name]['data']['y'] = y_vals
     return normalized_spectra
+
 
 @st.cache_data
 def prepare_3d_data(spectra_dict, ordered_spectra, graph3d_params, x_ranges, norm_method, norm_range):
@@ -1539,6 +2241,7 @@ def prepare_3d_data(spectra_dict, ordered_spectra, graph3d_params, x_ranges, nor
         return None, None, None, None, None
     return np.array(spectra_matrix), np.array(spectra_norm_matrix), common_x, np.array(y_values), colors
 
+
 def create_3d_surface_plot(X, Y, Z, x_label, y_label, z_label, colormap,
                            azimuth, elevation, show_grid=True, fig_width=10, fig_height=8,
                            title=""):
@@ -1562,6 +2265,7 @@ def create_3d_surface_plot(X, Y, Z, x_label, y_label, z_label, colormap,
     plt.tight_layout()
     return fig
 
+
 def create_3d_line_plot(X, Y, Z, colors, x_label, y_label, z_label,
                         azimuth, elevation, line_width=1.5, show_grid=True,
                         fig_width=10, fig_height=8, title=""):
@@ -1582,6 +2286,7 @@ def create_3d_line_plot(X, Y, Z, colors, x_label, y_label, z_label,
         ax.set_title(title, fontsize=13, fontweight='bold', pad=20)
     plt.tight_layout()
     return fig
+
 
 def apply_gradient_colors(ordered_spectra, palette_name):
     if not ordered_spectra:
@@ -1606,12 +2311,14 @@ def apply_gradient_colors(ordered_spectra, palette_name):
         st.error(f"Error applying gradient colors: {e}")
         return {}
 
+
 def extract_number_from_filename(filename):
     name = filename.replace('.txt', '')
     numbers = re.findall(r'[-+]?\d*\.?\d+', name)
     if numbers:
         return float(numbers[0])
     return None
+
 
 def _dataframe_hash(df):
     if df is None:
@@ -1620,6 +2327,7 @@ def _dataframe_hash(df):
         return hash((tuple(df['x'].values.tobytes()), tuple(df['y'].values.tobytes())))
     except Exception:
         return hash(str(df.shape))
+
 
 def _spectra_dict_hash(spectra_dict):
     try:
@@ -1631,6 +2339,7 @@ def _spectra_dict_hash(spectra_dict):
         return hash(tuple(items))
     except Exception:
         return hash(str(len(spectra_dict)))
+
 
 @st.fragment
 def render_combined_tab(cached, filtered_spectra, x_ranges):
@@ -1651,6 +2360,8 @@ def render_combined_tab(cached, filtered_spectra, x_ranges):
     line_width = cached['line_width']
     fig_width = cached['fig_width']
     fig_height = cached['fig_height']
+    preprocessing_params = cached.get('preprocessing_params', st.session_state.preprocessing_params)
+    show_baseline = preprocessing_params.get('show_baseline', False)
 
     normalized_spectra = {}
     for name, spec in filtered_spectra.items():
@@ -1686,7 +2397,8 @@ def render_combined_tab(cached, filtered_spectra, x_ranges):
             show_grid, line_width, fig_width, fig_height,
             legend_fontsize=cached['legend_fontsize'],
             legend_position=cached['legend_position'],
-            legend_offset=cached['legend_offset']
+            legend_offset=cached['legend_offset'],
+            show_baseline=(show_baseline and idx in (0, 2))
         )
         st.pyplot(fig)
         buf = BytesIO()
@@ -1712,6 +2424,7 @@ def render_combined_tab(cached, filtered_spectra, x_ranges):
     st.info("💡 For heatmap visualization, use the **Heatmaps** tab.")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 @st.fragment
 def render_peak_tab(cached, filtered_spectra):
@@ -1884,6 +2597,7 @@ def render_peak_tab(cached, filtered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 @st.fragment
 def render_correlation_tab(cached, filtered_spectra, ordered_spectra):
     st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -2018,6 +2732,7 @@ def render_correlation_tab(cached, filtered_spectra, ordered_spectra):
     )
 
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 @st.fragment
 def render_compare_tab(cached, filtered_spectra, ordered_spectra):
@@ -2166,6 +2881,7 @@ def render_compare_tab(cached, filtered_spectra, ordered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 @st.fragment
 def render_markers_plot_fragment(spectra, selected_offset_step, selected_fill,
                                   selected_normalized, selected_use_offset, selected_yl,
@@ -2201,6 +2917,7 @@ def render_markers_plot_fragment(spectra, selected_offset_step, selected_fill,
     </div>
     """, unsafe_allow_html=True)
     plt.close(fig_markers)
+
 
 @st.fragment
 def render_markers_tab(cached, filtered_spectra):
@@ -2466,6 +3183,7 @@ def render_markers_tab(cached, filtered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 @st.fragment
 def render_3d_tab(cached, filtered_spectra, ordered_spectra):
     st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -2715,6 +3433,7 @@ def render_3d_tab(cached, filtered_spectra, ordered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 @st.fragment
 def render_heatmap_tab(cached, filtered_spectra, ordered_spectra):
     st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
@@ -2940,6 +3659,381 @@ def render_heatmap_tab(cached, filtered_spectra, ordered_spectra):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
+# ============================ VOIGT FIT TAB ============================
+
+@st.fragment
+def render_voigt_fit_tab(cached, filtered_spectra, ordered_spectra):
+    st.markdown('<div class="scientific-card">', unsafe_allow_html=True)
+    st.subheader("🧪 Voigt Fitting (Peak Decomposition)")
+    st.markdown("*Fit a single spectrum with Voigt/PseudoVoigt/Gaussian/Lorentzian profiles. "
+                "Configure parameters first — nothing is computed until you press Apply.*")
+
+    if not ordered_spectra or not filtered_spectra:
+        st.warning("⚠️ No spectra loaded. Please upload spectra in the sidebar.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    draft = st.session_state.voigt_fit_draft
+
+    col1, col2 = st.columns(2)
+    with col1:
+        default_idx = 0
+        if draft.get('spectrum_name') in ordered_spectra:
+            default_idx = ordered_spectra.index(draft['spectrum_name'])
+        spectrum_name = st.selectbox(
+            "Select spectrum to fit",
+            options=ordered_spectra,
+            index=default_idx,
+            format_func=lambda x: x.replace('.txt', ''),
+            key="voigt_spectrum_select"
+        )
+    with col2:
+        mode_options = ["Raw (after preprocessing)", "Normalized (global norm_method)"]
+        default_mode_idx = mode_options.index(draft.get('mode', mode_options[0])) if draft.get('mode') in mode_options else 0
+        mode = st.radio(
+            "Data mode",
+            options=mode_options,
+            index=default_mode_idx,
+            key="voigt_mode_select",
+            horizontal=True
+        )
+
+    spec = filtered_spectra.get(spectrum_name)
+    if spec is None:
+        st.error("Selected spectrum not found.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    x_full = spec['data']['x'].values
+    y_raw = spec['data']['y'].values
+
+    if mode.startswith("Normalized"):
+        y_base = normalize_spectrum(
+            x_full, y_raw, cached['norm_method'], cached['norm_range'], cached['x_ranges']
+        )
+        norm_descr = f"Global normalization: {cached['norm_method']}"
+    else:
+        y_base = y_raw
+        norm_descr = "Raw intensity (preprocessing applied, no normalization)"
+    st.caption(f"ℹ️ {norm_descr}")
+
+    st.markdown("---")
+    st.markdown("#### ⚙️ Fit Parameters")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        profile_options = ['Voigt', 'PseudoVoigt', 'Gaussian', 'Lorentzian']
+        default_profile_idx = profile_options.index(draft.get('profile_type', 'Voigt')) if draft.get('profile_type') in profile_options else 0
+        profile_type = st.selectbox(
+            "Profile type",
+            options=profile_options,
+            index=default_profile_idx,
+            key="voigt_profile_type"
+        )
+        threshold = st.number_input(
+            "Peak detection threshold (min height)",
+            min_value=0.0, value=float(draft.get('threshold', 0.25)), step=0.01, format="%.4f",
+            key="voigt_threshold"
+        )
+        min_height = st.number_input(
+            "Minimum peak height (keep peaks above)",
+            min_value=0.0, value=float(draft.get('min_height', 2.0)), step=0.1, format="%.3f",
+            key="voigt_min_height"
+        )
+    with col2:
+        min_dist = st.number_input(
+            "Min distance between peaks (points)",
+            min_value=1, value=int(draft.get('min_dist', 2)), step=1,
+            key="voigt_min_dist"
+        )
+        prominence_value = st.number_input(
+            "Prominence (0 = auto)",
+            min_value=0.0, value=float(draft.get('prominence') or 0.0), step=0.01, format="%.3f",
+            key="voigt_prominence"
+        )
+        prominence = None if prominence_value <= 0 else prominence_value
+        center_vary = st.number_input(
+            "Center variation (±)",
+            min_value=0.0, value=float(draft.get('center_vary', 5.0)), step=0.5,
+            key="voigt_center_vary"
+        )
+    with col3:
+        max_iterations = st.number_input(
+            "Max residual-add iterations",
+            min_value=0, max_value=20, value=int(draft.get('max_iterations', 5)), step=1,
+            key="voigt_max_iter"
+        )
+        reduce_factor_default = draft.get('reduce_data_points_factor', None)
+        reduce_factor = st.number_input(
+            "Reduce data points factor (0 = no reduction)",
+            min_value=0, max_value=100, value=int(reduce_factor_default) if reduce_factor_default else 0, step=1,
+            key="voigt_reduce_factor"
+        )
+        reduce_factor = None if reduce_factor == 0 else reduce_factor
+        fit_method = st.selectbox(
+            "Fit method",
+            options=['leastsq', 'least_squares', 'nelder'],
+            index=['leastsq', 'least_squares', 'nelder'].index(draft.get('fit_method', 'leastsq')) if draft.get('fit_method', 'leastsq') in ['leastsq', 'least_squares', 'nelder'] else 0,
+            key="voigt_fit_method"
+        )
+
+    st.markdown("#### 📏 Fit Range")
+    use_global_x_ranges = st.checkbox(
+        "Use global x_ranges from sidebar",
+        value=bool(draft.get('use_global_x_ranges', False)),
+        key="voigt_use_global_xranges"
+    )
+    fit_left = None
+    fit_right = None
+    if not use_global_x_ranges:
+        xmin = float(np.min(x_full))
+        xmax = float(np.max(x_full))
+        col1, col2 = st.columns(2)
+        with col1:
+            left_default = draft.get('fit_range_left') if draft.get('fit_range_left') is not None else xmin
+            fit_left = st.slider(
+                "Fit range: left",
+                min_value=xmin, max_value=xmax,
+                value=float(np.clip(left_default, xmin, xmax)),
+                step=(xmax - xmin) / 500,
+                key="voigt_fit_left"
+            )
+        with col2:
+            right_default = draft.get('fit_range_right') if draft.get('fit_range_right') is not None else xmax
+            fit_right = st.slider(
+                "Fit range: right",
+                min_value=xmin, max_value=xmax,
+                value=float(np.clip(right_default, xmin, xmax)),
+                step=(xmax - xmin) / 500,
+                key="voigt_fit_right"
+            )
+        if fit_left >= fit_right:
+            st.warning("⚠️ Left boundary must be < right boundary")
+
+    st.markdown("#### ➕ Baseline component in fit (optional)")
+    add_baseline_component = st.checkbox(
+        "Add baseline component to model",
+        value=bool(draft.get('add_baseline_component', False)),
+        key="voigt_add_baseline"
+    )
+    baseline_component_type = draft.get('baseline_component_type', 'Constant')
+    baseline_poly_order = int(draft.get('baseline_poly_order', 1))
+    if add_baseline_component:
+        bct_options = ['Constant', 'Linear', 'Polynomial']
+        bct_idx = bct_options.index(baseline_component_type) if baseline_component_type in bct_options else 0
+        baseline_component_type = st.selectbox(
+            "Baseline component type",
+            options=bct_options,
+            index=bct_idx,
+            key="voigt_baseline_component_type"
+        )
+        if baseline_component_type == 'Polynomial':
+            baseline_poly_order = st.number_input(
+                "Polynomial order",
+                min_value=1, max_value=10,
+                value=baseline_poly_order,
+                step=1,
+                key="voigt_baseline_poly_order"
+            )
+
+    verbose = st.checkbox(
+        "Verbose output (fit log)",
+        value=bool(draft.get('verbose', True)),
+        key="voigt_verbose"
+    )
+
+    st.markdown("---")
+    colA, colB = st.columns(2)
+    with colA:
+        apply_clicked = st.button("🚀 Apply Fit", use_container_width=True, key="voigt_apply_btn")
+    with colB:
+        clear_clicked = st.button("🗑️ Clear Result", use_container_width=True, key="voigt_clear_btn")
+
+    if clear_clicked:
+        st.session_state.voigt_fit_result = None
+        st.session_state.voigt_fit_result_for = None
+        st.success("Result cleared.")
+        st.rerun(scope="fragment")
+
+    st.session_state.voigt_fit_draft = {
+        'spectrum_name': spectrum_name,
+        'mode': mode,
+        'profile_type': profile_type,
+        'threshold': threshold,
+        'min_height': min_height,
+        'min_dist': min_dist,
+        'prominence': prominence,
+        'center_vary': center_vary,
+        'max_iterations': max_iterations,
+        'reduce_data_points_factor': reduce_factor,
+        'fit_method': fit_method,
+        'use_global_x_ranges': use_global_x_ranges,
+        'fit_range_left': fit_left,
+        'fit_range_right': fit_right,
+        'add_baseline_component': add_baseline_component,
+        'baseline_component_type': baseline_component_type,
+        'baseline_poly_order': baseline_poly_order,
+        'verbose': verbose,
+    }
+
+    if apply_clicked:
+        if use_global_x_ranges and cached['x_ranges'] and len(cached['x_ranges']) > 0:
+            rs = min(s for s, e in cached['x_ranges'])
+            re_ = max(e for s, e in cached['x_ranges'])
+        elif not use_global_x_ranges and fit_left is not None and fit_right is not None:
+            rs, re_ = fit_left, fit_right
+        else:
+            rs, re_ = float(np.min(x_full)), float(np.max(x_full))
+
+        if rs >= re_:
+            st.error("Invalid fit range.")
+        else:
+            mask = (x_full >= rs) & (x_full <= re_)
+            if not np.any(mask):
+                st.error("No data points in the selected range.")
+            else:
+                xs_fit_range = x_full[mask]
+                ys_fit_range = y_base[mask]
+                progress_placeholder = st.empty()
+                progress_bar = progress_placeholder.progress(0.0, text="Fitting...")
+
+                def _progress_cb(iteration, total):
+                    frac = float(iteration) / float(max(1, total))
+                    progress_bar.progress(min(1.0, frac), text=f"Residual iteration {iteration}/{total}")
+
+                with st.spinner("Fitting Voigt profiles..."):
+                    result, err = fit_voigts_single(
+                        xs_fit_range, ys_fit_range,
+                        st.session_state.voigt_fit_draft,
+                        progress_callback=_progress_cb,
+                        verbose=verbose
+                    )
+                progress_bar.progress(1.0, text="Done")
+                if err is not None or result is None:
+                    st.error(f"Fit failed: {err}")
+                else:
+                    components_df = _extract_components_table(result, profile_type, xs_fit_range, ys_fit_range)
+                    st.session_state.voigt_fit_result = {
+                        'spectrum_name': spectrum_name,
+                        'mode': mode,
+                        'profile_type': profile_type,
+                        'params': dict(st.session_state.voigt_fit_draft),
+                        'xs': xs_fit_range,
+                        'ys': ys_fit_range,
+                        'best_fit': result.best_fit,
+                        'result_obj': result,
+                        'components_df': components_df,
+                        'fit_report': result.fit_report() if verbose else "",
+                        'fit_range': (rs, re_),
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    }
+                    st.session_state.voigt_fit_result_for = (spectrum_name, mode)
+                    st.success(f"✅ Fit complete! {len(components_df)} component(s) found.")
+                st.rerun(scope="fragment")
+
+    stored = st.session_state.voigt_fit_result
+    stored_for = st.session_state.voigt_fit_result_for
+    if stored is not None and stored_for == (spectrum_name, mode):
+        st.markdown("---")
+        st.subheader("📊 Fit Results")
+        result_obj = stored['result_obj']
+        xs_plot = stored['xs']
+        ys_plot = stored['ys']
+        components_df = stored['components_df']
+        profile_used = stored['profile_type']
+
+        fig_fit = plot_fit_results_streamlit(
+            xs_plot, ys_plot, result_obj,
+            title=f"Voigt Decomposition: {spectrum_name.replace('.txt', '')} ({mode})",
+            components_df=components_df,
+            residuals=True
+        )
+        st.pyplot(fig_fit)
+        buf = BytesIO()
+        fig_fit.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+        buf.seek(0)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        st.markdown(f"""
+        <div style="text-align: center; margin-top: 0.5rem; margin-bottom: 1rem;">
+            <a href="data:image/png;base64,{b64}" download="voigt_fit_{spectrum_name.replace('.txt','')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png">
+                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                               color: white; border: none; border-radius: 8px; 
+                               padding: 0.4rem 1rem; cursor: pointer; font-size: 0.9rem;">
+                    📥 Download Fit Plot (PNG, 600 dpi)
+                </button>
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+        plt.close(fig_fit)
+
+        st.markdown("#### 📋 Component Parameters")
+        if not components_df.empty:
+            display_df = components_df.copy()
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            csv_components = display_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Components (CSV)",
+                data=csv_components,
+                file_name=f"voigt_components_{spectrum_name.replace('.txt','')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No components extracted.")
+
+        st.markdown("#### 📈 Fit Quality Metrics")
+        try:
+            redchi = float(result_obj.redchi)
+        except Exception:
+            redchi = np.nan
+        try:
+            chisqr = float(result_obj.chisqr)
+        except Exception:
+            chisqr = np.nan
+        try:
+            aic = float(result_obj.aic)
+            bic = float(result_obj.bic)
+        except Exception:
+            aic = np.nan
+            bic = np.nan
+        try:
+            ss_res = np.sum((ys_plot - result_obj.best_fit) ** 2)
+            ss_tot = np.sum((ys_plot - np.mean(ys_plot)) ** 2)
+            r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+        except Exception:
+            r2 = np.nan
+        n_data = len(xs_plot)
+        n_params = len([p for p in result_obj.params.values() if p.vary])
+        dof = max(1, n_data - n_params)
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Reduced χ²", f"{redchi:.6g}")
+        with m2:
+            st.metric("χ²", f"{chisqr:.6g}")
+        with m3:
+            st.metric("R²", f"{r2:.6f}")
+        with m4:
+            st.metric("AIC", f"{aic:.4g}")
+        with m5:
+            st.metric("BIC", f"{bic:.4g}")
+        st.caption(f"N points: {n_data} | Parameters (varying): {n_params} | DOF: {dof} | Fit range: {stored['fit_range'][0]:.2f} – {stored['fit_range'][1]:.2f}")
+
+        if stored.get('fit_report'):
+            with st.expander("🧾 Full fit report (lmfit)"):
+                st.code(stored['fit_report'], language="text")
+
+        st.caption(f"Result computed at {stored['timestamp']} | Profile: {profile_used}")
+    elif stored is not None and stored_for != (spectrum_name, mode):
+        st.info("ℹ️ A previous fit result exists for a different spectrum/mode. Press **Apply Fit** to recompute for the current selection, or **Clear Result** to remove it.")
+    else:
+        st.info("ℹ️ Configure parameters above and press **Apply Fit** to compute the fit.")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ============================ MAIN ============================
+
 def main():
     import os
     from PIL import Image
@@ -3094,6 +4188,198 @@ def main():
                                 norm_range = (float(start), float(end))
                             except:
                                 st.warning("Invalid range format")
+
+                    st.markdown("#### 🧹 Preprocessing")
+                    st.markdown("*Applied automatically to all spectra before normalization and display*")
+
+                    with st.expander("Despike (Whitaker–Hayes)", expanded=False):
+                        despike_enabled = st.checkbox(
+                            "Enable despike",
+                            value=st.session_state.preprocessing_params.get('despike_enabled', False),
+                            key="pp_despike_enabled"
+                        )
+                        despike_kernel_size = st.slider(
+                            "Kernel size",
+                            min_value=1, max_value=15,
+                            value=int(st.session_state.preprocessing_params.get('despike_kernel_size', 3)),
+                            step=1, key="pp_despike_kernel"
+                        )
+                        despike_threshold = st.number_input(
+                            "Threshold (modified z-score)",
+                            min_value=1.0, max_value=30.0,
+                            value=float(st.session_state.preprocessing_params.get('despike_threshold', 8.0)),
+                            step=0.5, key="pp_despike_threshold"
+                        )
+
+                    with st.expander("Denoise", expanded=False):
+                        denoise_enabled = st.checkbox(
+                            "Enable denoise",
+                            value=st.session_state.preprocessing_params.get('denoise_enabled', False),
+                            key="pp_denoise_enabled"
+                        )
+                        denoise_method = st.selectbox(
+                            "Denoise method",
+                            options=['SavGol', 'Gaussian', 'Whittaker', 'Kernel'],
+                            index=['SavGol', 'Gaussian', 'Whittaker', 'Kernel'].index(
+                                st.session_state.preprocessing_params.get('denoise_method', 'SavGol')),
+                            key="pp_denoise_method"
+                        )
+                        if denoise_method == 'SavGol':
+                            denoise_window_length = st.slider(
+                                "Window length",
+                                min_value=3, max_value=51,
+                                value=int(st.session_state.preprocessing_params.get('denoise_window_length', 9)),
+                                step=2, key="pp_denoise_wl"
+                            )
+                            denoise_polyorder = st.slider(
+                                "Polyorder",
+                                min_value=1, max_value=7,
+                                value=int(st.session_state.preprocessing_params.get('denoise_polyorder', 3)),
+                                step=1, key="pp_denoise_po"
+                            )
+                            denoise_sigma = st.session_state.preprocessing_params.get('denoise_sigma', 1.0)
+                            denoise_lam = st.session_state.preprocessing_params.get('denoise_lam', 1e3)
+                            denoise_kernel_type = st.session_state.preprocessing_params.get('denoise_kernel_type', 'hanning')
+                            denoise_kernel_size = st.session_state.preprocessing_params.get('denoise_kernel_size', 11)
+                        elif denoise_method == 'Gaussian':
+                            denoise_sigma = st.slider(
+                                "Sigma",
+                                min_value=0.1, max_value=10.0,
+                                value=float(st.session_state.preprocessing_params.get('denoise_sigma', 1.0)),
+                                step=0.1, key="pp_denoise_sigma"
+                            )
+                            denoise_window_length = st.session_state.preprocessing_params.get('denoise_window_length', 9)
+                            denoise_polyorder = st.session_state.preprocessing_params.get('denoise_polyorder', 3)
+                            denoise_lam = st.session_state.preprocessing_params.get('denoise_lam', 1e3)
+                            denoise_kernel_type = st.session_state.preprocessing_params.get('denoise_kernel_type', 'hanning')
+                            denoise_kernel_size = st.session_state.preprocessing_params.get('denoise_kernel_size', 11)
+                        elif denoise_method == 'Whittaker':
+                            denoise_lam = st.number_input(
+                                "Lambda",
+                                min_value=1.0, max_value=1e10,
+                                value=float(st.session_state.preprocessing_params.get('denoise_lam', 1e3)),
+                                step=100.0, format="%.2e", key="pp_denoise_lam"
+                            )
+                            denoise_window_length = st.session_state.preprocessing_params.get('denoise_window_length', 9)
+                            denoise_polyorder = st.session_state.preprocessing_params.get('denoise_polyorder', 3)
+                            denoise_sigma = st.session_state.preprocessing_params.get('denoise_sigma', 1.0)
+                            denoise_kernel_type = st.session_state.preprocessing_params.get('denoise_kernel_type', 'hanning')
+                            denoise_kernel_size = st.session_state.preprocessing_params.get('denoise_kernel_size', 11)
+                        else:
+                            denoise_kernel_type = st.selectbox(
+                                "Kernel type",
+                                options=['flat', 'hanning', 'hamming', 'bartlett', 'blackman'],
+                                index=['flat', 'hanning', 'hamming', 'bartlett', 'blackman'].index(
+                                    st.session_state.preprocessing_params.get('denoise_kernel_type', 'hanning')),
+                                key="pp_denoise_ktype"
+                            )
+                            denoise_kernel_size = st.slider(
+                                "Kernel size",
+                                min_value=3, max_value=51,
+                                value=int(st.session_state.preprocessing_params.get('denoise_kernel_size', 11)),
+                                step=2, key="pp_denoise_ksize"
+                            )
+                            denoise_window_length = st.session_state.preprocessing_params.get('denoise_window_length', 9)
+                            denoise_polyorder = st.session_state.preprocessing_params.get('denoise_polyorder', 3)
+                            denoise_sigma = st.session_state.preprocessing_params.get('denoise_sigma', 1.0)
+                            denoise_lam = st.session_state.preprocessing_params.get('denoise_lam', 1e3)
+
+                    with st.expander("Baseline correction", expanded=False):
+                        baseline_enabled = st.checkbox(
+                            "Enable baseline correction",
+                            value=st.session_state.preprocessing_params.get('baseline_enabled', False),
+                            key="pp_baseline_enabled"
+                        )
+                        baseline_methods = ['AsLS', 'IAsLS', 'airPLS', 'arPLS', 'drPLS', 'IarPLS', 'asPLS',
+                                            'Poly', 'ModPoly', 'IModPoly', 'Goldindec', 'IRSQR', 'CornerCutting', 'FABC']
+                        baseline_method = st.selectbox(
+                            "Baseline method",
+                            options=baseline_methods,
+                            index=baseline_methods.index(st.session_state.preprocessing_params.get('baseline_method', 'asPLS')),
+                            key="pp_baseline_method"
+                        )
+                        preset_options = ['Raman', 'Fluorescence', 'Polynomial', 'Aggressive']
+                        preset = st.selectbox(
+                            "Preset",
+                            options=preset_options,
+                            index=preset_options.index(st.session_state.preprocessing_params.get('baseline_preset', 'Raman')) if st.session_state.preprocessing_params.get('baseline_preset', 'Raman') in preset_options else 0,
+                            key="pp_baseline_preset"
+                        )
+                        if preset == 'Raman':
+                            preset_lam, preset_p, preset_diff, preset_poly = 1e5, 1e-2, 2, 3
+                        elif preset == 'Fluorescence':
+                            preset_lam, preset_p, preset_diff, preset_poly = 1e6, 1e-3, 2, 3
+                        elif preset == 'Polynomial':
+                            preset_lam, preset_p, preset_diff, preset_poly = 1e5, 1e-2, 2, 3
+                        else:
+                            preset_lam, preset_p, preset_diff, preset_poly = 1e7, 1e-4, 3, 2
+
+                        baseline_lam = st.number_input(
+                            "Lambda",
+                            min_value=1.0, max_value=1e12,
+                            value=float(st.session_state.preprocessing_params.get('baseline_lam', preset_lam)),
+                            step=1000.0, format="%.2e", key="pp_baseline_lam"
+                        )
+                        baseline_p = st.number_input(
+                            "p (asymmetry)",
+                            min_value=0.0, max_value=1.0,
+                            value=float(st.session_state.preprocessing_params.get('baseline_p', preset_p)),
+                            step=0.001, format="%.4f", key="pp_baseline_p"
+                        )
+                        baseline_diff_order = st.number_input(
+                            "diff_order",
+                            min_value=1, max_value=5,
+                            value=int(st.session_state.preprocessing_params.get('baseline_diff_order', preset_diff)),
+                            step=1, key="pp_baseline_diff"
+                        )
+                        baseline_poly_order = st.number_input(
+                            "poly_order",
+                            min_value=1, max_value=15,
+                            value=int(st.session_state.preprocessing_params.get('baseline_poly_order', preset_poly)),
+                            step=1, key="pp_baseline_poly"
+                        )
+                        baseline_max_iter = st.number_input(
+                            "max_iter",
+                            min_value=1, max_value=500,
+                            value=int(st.session_state.preprocessing_params.get('baseline_max_iter', 50)),
+                            step=1, key="pp_baseline_maxiter"
+                        )
+                        baseline_tol = st.number_input(
+                            "tol",
+                            min_value=1e-8, max_value=1.0,
+                            value=float(st.session_state.preprocessing_params.get('baseline_tol', 1e-3)),
+                            step=1e-4, format="%.6f", key="pp_baseline_tol"
+                        )
+
+                    show_baseline = st.checkbox(
+                        "Show removed baseline on plots (diagnostics)",
+                        value=st.session_state.preprocessing_params.get('show_baseline', False),
+                        key="pp_show_baseline"
+                    )
+
+                    st.session_state.preprocessing_params = {
+                        'despike_enabled': despike_enabled,
+                        'despike_kernel_size': despike_kernel_size,
+                        'despike_threshold': despike_threshold,
+                        'denoise_enabled': denoise_enabled,
+                        'denoise_method': denoise_method,
+                        'denoise_window_length': denoise_window_length,
+                        'denoise_polyorder': denoise_polyorder,
+                        'denoise_sigma': denoise_sigma,
+                        'denoise_lam': denoise_lam,
+                        'denoise_kernel_type': denoise_kernel_type,
+                        'denoise_kernel_size': denoise_kernel_size,
+                        'baseline_enabled': baseline_enabled,
+                        'baseline_method': baseline_method,
+                        'baseline_preset': preset,
+                        'baseline_lam': baseline_lam,
+                        'baseline_p': baseline_p,
+                        'baseline_diff_order': baseline_diff_order,
+                        'baseline_poly_order': baseline_poly_order,
+                        'baseline_max_iter': baseline_max_iter,
+                        'baseline_tol': baseline_tol,
+                        'show_baseline': show_baseline,
+                    }
 
                     st.markdown("#### 📈 Offset Settings")
                     col1, col2 = st.columns(2)
@@ -3311,7 +4597,8 @@ def main():
                         'legend_offset': legend_offset,
                         'gradient_palette': st.session_state.gradient_palette,
                         'gradient_applied': st.session_state.gradient_applied,
-                        'gradient_colors_cache': st.session_state.gradient_colors_cache
+                        'gradient_colors_cache': st.session_state.gradient_colors_cache,
+                        'preprocessing_params': st.session_state.preprocessing_params,
                     }
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -3375,11 +4662,18 @@ def main():
         if common_x_range:
             current_spectra = align_x_ranges(current_spectra)
 
+        preprocessing_params = cached.get('preprocessing_params', st.session_state.preprocessing_params)
+        if (preprocessing_params.get('despike_enabled', False) or
+                preprocessing_params.get('denoise_enabled', False) or
+                preprocessing_params.get('baseline_enabled', False)):
+            current_spectra = preprocess_spectra(current_spectra, preprocessing_params)
+
         filtered_spectra = {name: current_spectra[name] for name in ordered_spectra if name in current_spectra}
 
         tab_names = [
             "Combined Spectra Visualization",
             "Advanced Peak Analysis",
+            "Voigt Fitting",
             "Parameter Correlation",
             "Compare Two Spectra",
             "Spectral Markers",
@@ -3408,6 +4702,8 @@ def main():
             render_combined_tab(cached, filtered_spectra, x_ranges)
         elif selected_tab == "Advanced Peak Analysis":
             render_peak_tab(cached, filtered_spectra)
+        elif selected_tab == "Voigt Fitting":
+            render_voigt_fit_tab(cached, filtered_spectra, ordered_spectra)
         elif selected_tab == "Parameter Correlation":
             render_correlation_tab(cached, filtered_spectra, ordered_spectra)
         elif selected_tab == "Compare Two Spectra":
@@ -3491,6 +4787,8 @@ Spectral Markers: {len(st.session_state.spectral_markers)} markers
 3D Graphs Created: {st.session_state.get('graph3d_created', False)}
 Gradient Colors Applied: {st.session_state.get('gradient_applied', False)}
 Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
+Preprocessing: despike={cached.get('preprocessing_params', {}).get('despike_enabled', False)}, denoise={cached.get('preprocessing_params', {}).get('denoise_enabled', False)}, baseline={cached.get('preprocessing_params', {}).get('baseline_enabled', False)} ({cached.get('preprocessing_params', {}).get('baseline_method', '-')})
+Voigt Fit Result: {'present' if st.session_state.voigt_fit_result is not None else 'absent'}
 """
             st.download_button(
                 label="📄 Export Session Info",
@@ -3509,19 +4807,23 @@ Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
         st.markdown("""
         1. **Upload Data** - Select one or more .txt files with two columns (x y, tab-separated)
         2. **Configure Analysis** - Choose spectra, assign colors, set normalization and offset parameters
-        3. **Visualize** - Explore combined spectra visualization with multiple display modes
-        4. **Analyze Peaks** - Detect and characterize spectral peaks automatically
-        5. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
-        6. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
-        7. **Add Markers** - Place vertical lines and regions to track spectral features
-        8. **3D Visualization** - Explore spectra in 3D with surface and line plots
-        9. **Heatmaps** - Generate heatmaps for temperature/concentration dependence
-        10. **Export Results** - Download processed data, plots, and analysis results
+        3. **Preprocessing** - Optionally enable despike, denoise, and baseline correction
+        4. **Visualize** - Explore combined spectra visualization with multiple display modes
+        5. **Analyze Peaks** - Detect and characterize spectral peaks automatically
+        6. **Voigt Fitting** - Decompose a single spectrum into Voigt/PseudoVoigt/Gaussian/Lorentzian profiles
+        7. **Correlate Parameters** - Investigate relationships between spectral features and experimental parameters
+        8. **Compare Spectra** - Analyze differences between two spectra with heatmap visualization
+        9. **Add Markers** - Place vertical lines and regions to track spectral features
+        10. **3D Visualization** - Explore spectra in 3D with surface and line plots
+        11. **Heatmaps** - Generate heatmaps for temperature/concentration dependence
+        12. **Export Results** - Download processed data, plots, and analysis results
         """)
 
         st.markdown("### ✨ Key Features:")
         st.markdown("""
         - 🔬 **Multi-Mode Visualization** - Raw, normalized, and offset spectra in one comprehensive view
+        - 🧹 **Preprocessing Pipeline** - Despike (Whitaker–Hayes), denoise (SavGol/Gaussian/Whittaker/Kernel), and 14 baseline correction methods from pybaselines
+        - 🧪 **Voigt Fitting** - Full peak decomposition for a single selected spectrum with iteration and residual analysis
         - 📊 **Broken Axis Support** - Display multiple x-axis ranges with gaps between them
         - 🎨 **Customizable Colors** - Individual color assignment for each spectrum
         - 📈 **Automatic Peak Detection** - Find peaks, calculate areas, and analyze intensities
@@ -3556,6 +4858,7 @@ Gradient Palette: {st.session_state.get('gradient_palette', 'Not applied')}
         <p style="font-size: 0.75rem;">© 2026 SpectrAnalys | © developed by daM - Advanced Spectroscopy Data Analysis Tool</p>
     </div>
     """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
